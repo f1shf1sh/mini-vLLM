@@ -1,0 +1,3 @@
+hello world
+this is a tiny decoder-only transformer scaffold.
+we will implement it step by step.

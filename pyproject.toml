@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mini-decoder-only"
+version = "0.1.0"
+description = "Minimal decoder-only Transformer learning scaffold."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0.3",
+    "torch>=2.11.0",
+    "tqdm>=4.67.3",
+]
+
+[project.scripts]
+mini-decoder-train = "mini_decoder_only.train:main"
+mini-decoder-generate = "mini_decoder_only.generate:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,28 @@
+model:
+  vocab_size: 0
+  block_size: 128
+  n_layer: 2
+  n_head: 4
+  n_embd: 128
+  dropout: 0.1
+  bias: false
+
+training:
+  batch_size: 32
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  max_iters: 5000
+  eval_interval: 200
+  eval_iters: 50
+  train_split: 0.9
+  device: cpu
+  seed: 42
+
+generation:
+  max_new_tokens: 128
+  temperature: 1.0
+  top_k: null
+
+paths:
+  input_text: data/input.txt
+  output_dir: outputs

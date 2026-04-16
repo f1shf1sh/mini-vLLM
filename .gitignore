@@ -1,0 +1,30 @@
+# Python cache and build artifacts
+__pycache__/
+*.py[oc]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+wheels/
+*.egg-info/
+
+# Virtual environments
+.venv/
+
+# Training outputs
+outputs/*
+!outputs/.gitkeep
+*.pt
+*.pth
+*.bin
+*.log
+
+# Local data artifacts
+data/*.npy
+data/*.npz
+data/*.pkl
+
+# macOS
+.DS_Store
