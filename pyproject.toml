@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "mini-decoder-only"
+name = "lmcore"
 version = "0.1.0"
-description = "Minimal decoder-only Transformer learning scaffold."
+description = "Minimal inference infra learning scaffold."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-mini-decoder-train = "mini_decoder_only.train:main"
-mini-decoder-generate = "mini_decoder_only.generate:main"
+lmcore-train = "lmcore.runtime.train:main"
+lmcore-generate = "lmcore.runtime.generate:main"
 
 [dependency-groups]
 dev = [
