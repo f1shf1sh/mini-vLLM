@@ -6,12 +6,14 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..dataset import CharTokenizer, TextDataset
-from ..config import ProjectConfig, load_config
-from ..model import GPTMini
-from ..utils import set_seed, timer, tokens_per_second
-
 import torch
+
+from ..checkpoint import save_checkpoint
+from ..config import ProjectConfig, load_config
+from ..dataset import TextDataset
+from ..model import GPTMini
+from ..tokenizer import CharTokenizer
+from ..utils import set_seed, timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -50,35 +52,6 @@ def estimate_loss(
     model.train()
 
     return losses
-
-
-def save_checkpoint(
-    output_dir: str,
-    model: GPTMini,
-    optimizer: torch.optim.Optimizer,
-    config: ProjectConfig,
-    tokenizer: CharTokenizer,
-    step: int,
-) -> Path:
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    ckpt_path = output_path / "ckpt.pt"
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            # Save optimizer state, not the optimizer object itself.
-            "optimizer_state_dict": optimizer.state_dict(),
-            "config": config.to_dict(),
-            "stoi": tokenizer.stoi,
-            "itos": tokenizer.itos,
-            "step": step,
-        },
-        ckpt_path,
-    )
-
-    return ckpt_path
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()

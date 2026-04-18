@@ -8,27 +8,6 @@ import torch
 from torch import Tensor
 
 
-class CharTokenizer:
-    """A minimal reversible character tokenizer."""
-
-    def __init__(self, text: str) -> None:
-        chars = sorted(set(text))
-        if not chars:
-            raise ValueError("Tokenizer text must contain at least one character.")
-        self.stoi = {ch: idx for idx, ch in enumerate(chars)}
-        self.itos = {idx: ch for ch, idx in self.stoi.items()}
-        
-    @property
-    def vocab_size(self) -> int:
-        return len(self.stoi)
-
-    def encode(self, text: str) -> list[int]:
-        return [self.stoi[ch] for ch in text]
-
-    def decode(self, ids: Sequence[int]) -> str:
-        return "".join(self.itos[idx] for idx in ids)
-
-
 class TextDataset:
     """Random-window dataset used for next-token training."""
 

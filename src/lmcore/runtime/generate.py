@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
-from pathlib import Path
-from typing import Any
 
 import torch
 
+from ..checkpoint import load_checkpoint
 from ..config import ProjectConfig
 from ..model import GPTMini
+from ..tokenizer import CharTokenizer
 from ..utils import timer, tokens_per_second
 
 
@@ -27,33 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override device from checkpoint config, e.g. cpu or cuda.",
     )
     return parser
-
-
-def load_checkpoint(path: str | Path, device: str) -> dict[str, Any]:
-    ckpt_path = Path(path)
-    if not ckpt_path.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
-    return torch.load(ckpt_path, map_location=device)
-
-
-def normalize_stoi(raw_stoi: dict[Any, Any]) -> dict[str, int]:
-    return {str(ch): int(idx) for ch, idx in raw_stoi.items()}
-
-
-def normalize_itos(raw_itos: dict[Any, Any]) -> dict[int, str]:
-    return {int(idx): str(ch) for idx, ch in raw_itos.items()}
-
-
-def encode_prompt(prompt: str, stoi: dict[str, int]) -> list[int]:
-    missing = sorted({ch for ch in prompt if ch not in stoi})
-    if missing:
-        raise ValueError(f"Prompt contains unseen characters: {missing!r}")
-    return [stoi[ch] for ch in prompt]
-
-
-def decode_ids(ids: Sequence[int], itos: dict[int, str]) -> str:
-    return "".join(itos[int(idx)] for idx in ids)
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
@@ -73,16 +46,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise ValueError("CUDA was requested but is not available.")
 
-    stoi = normalize_stoi(ckpt["stoi"])
-    itos = normalize_itos(ckpt["itos"])
-
-    config.model.vocab_size = len(stoi)
+    tokenizer = CharTokenizer.from_vocab(ckpt["stoi"], ckpt["itos"])
+    config.model.vocab_size = tokenizer.vocab_size
     model = GPTMini(config.model)
     model.load_state_dict(ckpt["model_state_dict"])
     model = model.to(device)
     model.eval()
 
-    prompt_ids = encode_prompt(args.prompt, stoi)
+    prompt_ids = tokenizer.encode(args.prompt)
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=device)
 
     with timer() as elapsed:
@@ -95,7 +66,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elapsed_seconds = elapsed()
 
     generated_ids = out[0].tolist()
-    generated_text = decode_ids(generated_ids, itos)
+    generated_text = tokenizer.decode(generated_ids)
     new_tokens = max(len(generated_ids) - len(prompt_ids), 0)
     tps = tokens_per_second(new_tokens, elapsed_seconds)
 

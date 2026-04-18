@@ -1,10 +1,19 @@
-from lmcore.dataset import CharTokenizer, TextDataset
-import logging
+from lmcore.dataset import TextDataset
+from lmcore.tokenizer import CharTokenizer
 
 def test_char_tokenizer_round_trip() -> None:
     tokenizer = CharTokenizer("hello world")
     encoded = tokenizer.encode("hello")
     assert tokenizer.decode(encoded) == "hello"
+
+
+def test_char_tokenizer_from_vocab_round_trip() -> None:
+    tokenizer = CharTokenizer("hello world")
+    restored = CharTokenizer.from_vocab(tokenizer.stoi, tokenizer.itos)
+
+    encoded = restored.encode("world")
+
+    assert restored.decode(encoded) == "world"
 
 
 def test_text_dataset_batch_alignment() -> None:
