@@ -1,4 +1,4 @@
-from mini_decoder_only.dataset import CharTokenizer, TextDataset
+from lmcore.dataset import CharTokenizer, TextDataset
 import logging
 
 def test_char_tokenizer_round_trip() -> None:

@@ -6,16 +6,16 @@ import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
-from .dataset import CharTokenizer, TextDataset
-from .config import ProjectConfig, load_config
-from .model import GPTMini
-from .utils import set_seed, timer, tokens_per_second
+from ..dataset import CharTokenizer, TextDataset
+from ..config import ProjectConfig, load_config
+from ..model import GPTMini
+from ..utils import set_seed, timer, tokens_per_second
 
 import torch
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Training scaffold for mini-decoder-only.")
+    parser = argparse.ArgumentParser(description="Training scaffold for lmcore.")
     parser.add_argument(
         "--config",
         default="configs/base.yaml",

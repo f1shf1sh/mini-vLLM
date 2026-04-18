@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from mini_decoder_only.config import load_config
+from lmcore.config import load_config
 
 
 def test_load_base_config() -> None:

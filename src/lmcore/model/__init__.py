@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import nn
 
 from .block import Block
-from .config import ModelConfig
+from ..config import ModelConfig
 
 
 class GPTMini(nn.Module):

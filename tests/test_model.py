@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from mini_decoder_only.config import ModelConfig
-from mini_decoder_only.model import GPTMini
+from lmcore.config import ModelConfig
+from lmcore.model import GPTMini
 
 
 def make_model_config() -> ModelConfig:

@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from mini_decoder_only.attention import Head, MultiHeadAttention
+from lmcore.model.attention import Head, MultiHeadAttention
 
 
 def test_head_output_shape() -> None:

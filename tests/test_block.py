@@ -1,6 +1,6 @@
 import torch
 
-from mini_decoder_only.block import Block, FeedForward
+from lmcore.model.block import Block, FeedForward
 
 
 def test_feedforward_output_shape() -> None:
