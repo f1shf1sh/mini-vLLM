@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 
 @dataclass(slots=True)
 class ModelConfig:
@@ -68,68 +70,7 @@ def load_config(path: str | Path) -> ProjectConfig:
     """Load a YAML config file into a typed project config."""
 
     config_path = Path(path)
-    raw = _load_simple_yaml(config_path.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Config root must be a mapping, got {type(raw).__name__}.")
     return ProjectConfig.from_dict(raw)
-
-
-def _load_simple_yaml(text: str) -> dict[str, Any]:
-    """Parse the small YAML subset used by configs/base.yaml.
-
-    Supported features:
-    - nested dictionaries via indentation
-    - integers and floats
-    - booleans
-    - null
-    - plain strings
-    """
-
-    root: dict[str, Any] = {}
-    stack: list[tuple[int, dict[str, Any]]] = [(-1, root)]
-
-    for raw_line in text.splitlines():
-        line = raw_line.split("#", 1)[0].rstrip()
-        if not line.strip():
-            continue
-
-        indent = len(line) - len(line.lstrip(" "))
-        key, sep, value = line.strip().partition(":")
-        if not sep:
-            raise ValueError(f"Invalid config line: {raw_line!r}")
-
-        while indent <= stack[-1][0]:
-            stack.pop()
-
-        current = stack[-1][1]
-        clean_value = value.strip()
-
-        if not clean_value:
-            child: dict[str, Any] = {}
-            current[key] = child
-            stack.append((indent, child))
-            continue
-
-        current[key] = _parse_scalar(clean_value)
-
-    return root
-
-
-def _parse_scalar(value: str) -> Any:
-    lowered = value.lower()
-    if lowered == "true":
-        return True
-    if lowered == "false":
-        return False
-    if lowered == "null":
-        return None
-
-    try:
-        return int(value)
-    except ValueError:
-        pass
-
-    try:
-        return float(value)
-    except ValueError:
-        pass
-
-    return value
