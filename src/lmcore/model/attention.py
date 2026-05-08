@@ -85,24 +85,61 @@ class MultiHeadAttention(nn.Module):
         self.dropout = dropout
         self.bias = bias
 
-        self.heads = nn.ModuleList(
-            [
-                Head(
-                    n_embd=n_embd,
-                    head_size=head_size,
-                    block_size=block_size,
-                    dropout=dropout,
-                    bias=bias 
-                )
-                for _ in range(n_head)
-            ]
-        )
+        self.key = nn.Linear(n_embd, n_embd, bias=bias)
+        self.query = nn.Linear(n_embd, n_embd, bias=bias)
+        self.value = nn.Linear(n_embd, n_embd, bias=bias)
+        
+        self.attn_dropout = nn.Dropout(dropout) 
         self.proj = nn.Linear(n_embd, n_embd, bias=bias)
         self.proj_dropout = nn.Dropout(dropout)
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        head_outputs = [head(x) for head in self.heads]
-        out = torch.cat(head_outputs, dim=-1)
+        
+        self.register_buffer(
+            "tril",
+            torch.tril(torch.ones(block_size, block_size))
+        )
+    def forward(self, 
+                x: torch.Tensor,
+                layer_past: tuple[torch.Tensor, torch.Tensor] | None = None,
+                use_cache: bool = False,
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        B, S, _ = x.shape
+        
+        q = self.query(x)
+        k = self.key(x)
+        v = self.value(x)
+        
+        q = q.view(B, S, self.n_head, self.head_size).transpose(1, 2)
+        k = k.view(B, S, self.n_head, self.head_size).transpose(1, 2)
+        v = v.view(B, S, self.n_head, self.head_size).transpose(1, 2)
+         
+        if layer_past is not None:
+            past_k, past_v = layer_past
+            k = torch.cat((past_k, k), dim=2)
+            v = torch.cat((past_v, v), dim=2)
+
+        present = (k, v) if use_cache else None
+        
+        q_len = q.size(2)
+        k_len = k.size(2)
+        past_len = k_len - q_len
+        
+        att = q @ k.transpose(-2, -1)
+        att = att * (self.head_size ** -0.5)
+        
+        causal_mask = torch.ones(
+            q_len,
+            k_len,
+            device=x.device,
+            dtype=torch.bool
+        ).tril(diagonal=past_len)
+        
+        att = att.masked_fill(~causal_mask, float("-inf"))
+        att = torch.softmax(att, dim=-1)
+        att = self.attn_dropout(att)
+        
+        out = att @ v
+        out = out.transpose(1, 2).contiguous().view(B, S, self.n_embd)
         out = self.proj(out)
         out = self.proj_dropout(out)
         
-        return out
+        return out, present

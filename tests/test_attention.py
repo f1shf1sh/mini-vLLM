@@ -51,9 +51,10 @@ def test_multi_head_attention_output_shape() -> None:
     )
     x = torch.randn(3, 5, 8)
 
-    out = attn(x)
+    out, present = attn(x)
 
     assert out.shape == (3, 5, 8)
+    assert present is None
 
 
 def test_multi_head_attention_requires_divisible_dimensions() -> None:

@@ -45,7 +45,7 @@ def estimate_loss(
             split_losses = []
             for _ in range(eval_iters):
                 x, y = dataset.get_batch(split)
-                _, loss = model(x, y)
+                _, loss, _ = model(x, y)
                 split_losses.append(loss.item())
             losses[split] = sum(split_losses) / len(split_losses)
     # Restore train mode before the main optimization loop continues.
@@ -99,7 +99,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for step in range(config.training.max_iters):
         with timer() as elapsed:
             x, y = dataset.get_batch("train")
-            _, loss = model(x, y)
+            _, loss, _ = model(x, y)
 
             optimizer.zero_grad()
             loss.backward()

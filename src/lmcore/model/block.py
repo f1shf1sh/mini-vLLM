@@ -62,7 +62,16 @@ class Block(nn.Module):
             dropout=dropout,
             bias=bias,
         )
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x))
+    def forward(self, 
+                x: torch.Tensor,
+                layer_past: tuple[torch.Tensor, torch.Tensor] | None = None,
+                use_cache: bool = False,         
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor] | None]:
+        attn_out, present = self.attn(
+            self.ln1(x),
+            layer_past,
+            use_cache
+        )
+        x = x + attn_out
         x = x + self.ffwd(self.ln2(x))
-        return x
+        return x, present

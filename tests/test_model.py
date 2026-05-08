@@ -23,7 +23,7 @@ def test_model_forward_output_shape_and_loss() -> None:
     idx = torch.randint(0, 11, (2, 5))
     targets = torch.randint(0, 11, (2, 5))
 
-    logits, loss = model(idx, targets)
+    logits, loss, _ = model(idx, targets)
 
     assert logits.shape == (2, 5, 11)
     assert loss is not None
