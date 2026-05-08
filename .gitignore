@@ -13,6 +13,9 @@ wheels/
 # Virtual environments
 .venv/
 
+# Training data
+data/*
+
 # Training outputs
 outputs/*
 !outputs/.gitkeep

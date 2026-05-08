@@ -1,19 +1,19 @@
 model:
   vocab_size: 0
-  block_size: 128
-  n_layer: 2
-  n_head: 4
-  n_embd: 128
+  block_size: 64
+  n_layer: 1
+  n_head: 2
+  n_embd: 64
   dropout: 0.1
   bias: false
 
 training:
-  batch_size: 32
+  batch_size: 16
   learning_rate: 0.0003
   weight_decay: 0.01
-  max_iters: 5000
-  eval_interval: 200
-  eval_iters: 50
+  max_iters: 60
+  eval_interval: 20
+  eval_iters: 5
   train_split: 0.9
   device: cpu
   seed: 42

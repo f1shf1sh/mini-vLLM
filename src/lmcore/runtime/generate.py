@@ -51,6 +51,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     model = GPTMini(config.model)
     model.load_state_dict(ckpt["model_state_dict"])
     model = model.to(device)
+    
+    # close dropout
     model.eval()
 
     prompt_ids = tokenizer.encode(args.prompt)

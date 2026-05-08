@@ -1,3 +1,26 @@
-hello world
-this is a tiny decoder-only transformer scaffold.
-we will implement it step by step.
+hello world.
+hello mini vllm.
+this is a tiny cpu training corpus.
+the model learns simple character patterns.
+attention reads previous characters and predicts the next character.
+kv cache is used during generation after training.
+
+hello world.
+hello mini vllm.
+quick training on cpu should finish fast.
+small data, small model, short run.
+the checkpoint will be saved to outputs/ckpt.pt.
+
+prompt: hello
+answer: hello world.
+
+prompt: model
+answer: model learns from text.
+
+prompt: cache
+answer: cache stores key and value tensors.
+
+hello world.
+hello mini vllm.
+cpu training is simple.
+generate text from a small checkpoint.
