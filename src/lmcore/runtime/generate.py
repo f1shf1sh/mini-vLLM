@@ -9,6 +9,8 @@ import torch
 
 from ..checkpoint import load_checkpoint
 from ..config import ProjectConfig
+from ..inference.generator import generate_tokens
+from ..inference.sampler import SamplingParams
 from ..model import GPTMini
 from ..tokenizer import CharTokenizer
 from ..utils import timer, tokens_per_second
@@ -59,11 +61,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     idx = torch.tensor([prompt_ids], dtype=torch.long, device=device)
 
     with timer() as elapsed:
-        out = model.generate(
-            idx=idx,
+        out = generate_tokens(
+            model=model,
+            input_ids=idx,
             max_new_tokens=args.max_new_tokens,
-            temperature=args.temperature,
-            top_k=args.top_k,
+            sampling_params=SamplingParams(
+                temperature=args.temperature,
+                top_k=args.top_k,
+            ),
         )
     elapsed_seconds = elapsed()
 

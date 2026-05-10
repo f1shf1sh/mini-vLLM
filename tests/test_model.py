@@ -47,10 +47,3 @@ def test_model_generate_appends_new_tokens() -> None:
 
     assert out.shape == (2, 7)
 
-
-def test_model_generate_rejects_non_positive_temperature() -> None:
-    model = GPTMini(make_model_config())
-    idx = torch.randint(0, 11, (1, 3))
-
-    with pytest.raises(ValueError):
-        model.generate(idx, max_new_tokens=2, temperature=0.0)

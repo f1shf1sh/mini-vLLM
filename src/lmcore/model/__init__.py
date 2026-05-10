@@ -8,6 +8,7 @@ from torch import nn
 
 from .block import Block
 from ..config import ModelConfig
+from ..inference.sampler import Sampler, SamplingParams
 
 
 class GPTMini(nn.Module):
@@ -101,23 +102,16 @@ class GPTMini(nn.Module):
         temperature: float = 1.0,
         top_k: int | None = None,
     ) -> torch.Tensor:
-        if temperature <= 0:
-            raise ValueError("temperature must be positive.")
-
         # prefill stage
         logits, _, past_key_value = self(idx[:, -self.config.block_size :], use_cache = True)
+        sampler = Sampler(
+                SamplingParams(
+                    temperature=temperature,
+                    top_k=top_k,
+                )
+            )
         for _ in range(max_new_tokens):
-            logits = logits[:, -1, :]
-            logits = logits / temperature
-
-            if top_k is not None:
-                k = min(top_k, logits.size(-1))
-                values, _ = torch.topk(logits, k)
-                cutoff = values[:, [-1]]
-                logits = logits.masked_fill(logits < cutoff, float("-inf"))
-
-            probs = F.softmax(logits, dim=-1)
-            idx_next = torch.multinomial(probs, num_samples=1)
+            idx_next = sampler.sample(logits)
             
             idx = torch.cat((idx, idx_next), dim=1)
             logits, _, past_key_value = self(
