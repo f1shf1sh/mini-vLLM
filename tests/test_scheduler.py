@@ -263,3 +263,117 @@ def test_kv_cache_cleaned_after_finish() -> None:
 
     assert "r1" not in scheduler._kv_caches
     assert "r1" not in scheduler._next_inputs
+
+
+# ── FIFO 顺序 ──────────────────────────────────────────────────────────
+
+def test_waiting_is_fifo() -> None:
+    """先 add 的请求先 prefill（FCFS），而不是后进先出。"""
+    torch.manual_seed(0)
+    scheduler = Scheduler(make_model())
+    # 两个请求都 max_new_tokens=1 → prefill 就完成，
+    # 完成顺序 = prefill 顺序 = add 顺序
+    scheduler.add_request(Request("first", [1, 2], max_new_tokens=1))
+    scheduler.add_request(Request("second", [3, 4], max_new_tokens=1))
+
+    finished_order: list[str] = []
+    while not scheduler.is_done:
+        for req in scheduler.step():
+            finished_order.append(req.request_id)
+
+    assert finished_order == ["first", "second"]
+
+
+def test_running_decode_interleaves_round_robin() -> None:
+    """多个 running 请求应轮流 decode，不应让某一个独占所有 step。"""
+    torch.manual_seed(0)
+    scheduler = Scheduler(make_model())
+    scheduler.add_request(Request("a", [1, 2], max_new_tokens=3))
+    scheduler.add_request(Request("b", [3, 4], max_new_tokens=3))
+
+    # 两次 prefill：a 和 b 各拿到 1 个 token，进入 running
+    scheduler.step()
+    scheduler.step()
+    assert {r.request_id for r in scheduler.running} == {"a", "b"}
+    assert all(r.num_generated_tokens == 1 for r in scheduler.running)
+
+    # 第 3 步 decode：应该是 a（先入 running 的），生成第 2 个 token
+    scheduler.step()
+    by_id = {r.request_id: r for r in scheduler.running}
+    assert by_id["a"].num_generated_tokens == 2
+    assert by_id["b"].num_generated_tokens == 1, "b 不应被跳过——a 独占就是 bug"
+
+    # 第 4 步 decode：轮到 b
+    scheduler.step()
+    by_id = {r.request_id: r for r in scheduler.running}
+    assert by_id["a"].num_generated_tokens == 2
+    assert by_id["b"].num_generated_tokens == 2
+
+
+# ── 边界 ───────────────────────────────────────────────────────────────
+
+def test_max_new_tokens_zero_generates_nothing() -> None:
+    """max_new_tokens=0 的请求不应生成任何 token。"""
+    torch.manual_seed(0)
+    scheduler = Scheduler(make_model())
+    scheduler.add_request(Request("r", [1, 2, 3], max_new_tokens=0))
+
+    finished = scheduler.step()
+
+    assert len(finished) == 1
+    assert finished[0].num_generated_tokens == 0
+    assert finished[0].output_ids == [1, 2, 3]
+    assert finished[0].is_finished
+
+
+def test_duplicate_request_id_rejected() -> None:
+    """重复 request_id 应直接报错，避免内部状态被覆盖。"""
+    import pytest
+    scheduler = Scheduler(make_model())
+    scheduler.add_request(Request("dup", [1, 2], max_new_tokens=1))
+    with pytest.raises(ValueError, match="Duplicate request_id"):
+        scheduler.add_request(Request("dup", [3, 4], max_new_tokens=1))
+
+
+# ── 每请求 sampling params ──────────────────────────────────────────────
+
+def test_per_request_sampling_params_used() -> None:
+    """请求自带的 sampling_params 应被使用，而不是 scheduler 的默认值。
+
+    用 top_k=1（贪心）让结果可预测，然后与 CachedGenerator 比对：
+    两者在相同 seed/相同 sampling 下输出必须一致。
+    """
+    prompt_ids = [1, 2, 3]
+    max_tokens = 3
+    params = SamplingParams(temperature=1.0, top_k=1)
+
+    # 基准：CachedGenerator + 同样的 sampler
+    torch.manual_seed(42)
+    gen_model = make_model()
+    gen = CachedGenerator(gen_model, sampler=Sampler(params))
+    expected = gen.generate(
+        torch.tensor([prompt_ids], dtype=torch.long),
+        max_new_tokens=max_tokens,
+    )[0].tolist()
+
+    # Scheduler：默认 sampler 用 temperature=2.0（故意"错的"），
+    # 但请求自带 top_k=1 的 params——结果应跟随请求的 params。
+    torch.manual_seed(42)
+    sched_model = make_model()
+    scheduler = Scheduler(
+        sched_model,
+        sampler=Sampler(SamplingParams(temperature=2.0)),  # 默认（不该被用上）
+    )
+    scheduler.add_request(Request(
+        "r", prompt_ids, max_new_tokens=max_tokens, sampling_params=params,
+    ))
+    while not scheduler.is_done:
+        scheduler.step()
+
+    actual = scheduler.finished[0].output_ids
+    assert actual == expected, (
+        f"per-request sampling_params 被忽略：\n"
+        f"  expected (using request's params): {expected}\n"
+        f"  actual:                            {actual}"
+    )
+
