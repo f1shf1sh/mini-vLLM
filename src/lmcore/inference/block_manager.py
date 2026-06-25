@@ -81,19 +81,47 @@ class BlockAllocator:
         return len(self.free_blocks)
 
 class BlockManager:
-    def __init__(self, num_blocks: int, block_size: int) -> None:
-        self.allocator = BlockAllocator(num_blocks)
+    def __init__(self, allocator: BlockAllocator, block_size: int) -> None:
+        self.allocator = allocator
         self.block_size = block_size
         self.block_tables: dict[str, BlockTable] = {}
 
     def allocate_for_request(self, request_id: str, num_tokens: int) -> None:
-        ...
-
+        if request_id in self.block_tables:
+            raise ValueError(
+                f"request_id: {request_id} already exists in block_tables"
+                )
+        
+        table = BlockTable(block_size=self.block_size)
+        
+        '''
+        If num_tokens = 0, not execute next loop
+        ''' 
+        num_blocks = table.num_logical_blocks_for(num_tokens) 
+        for _ in range(num_blocks):
+            table.append_block(self.allocator.allocate())
+        
+        table.num_tokens = num_tokens
+        self.block_tables[request_id] = table 
+        
     def append_token(self, request_id: str) -> None:
-        ...
+        table = self.block_tables[request_id]
+        
+        num_tokens = table.num_tokens
+        if num_tokens % table.block_size == 0:
+            table.append_block(self.allocator.allocate())
+        
+        table.num_tokens += 1
 
     def free_request(self, request_id: str) -> None:
-        ...
-
+        table = self.block_tables[request_id]
+        
+        for block_id in table.physical_blocks:
+            self.allocator.free(block_id)
+        
+        del self.block_tables[request_id]
+        
     def locate(self, request_id: str, token_pos: int) -> tuple[int, int]:
-        ...
+        table = self.block_tables[request_id]
+        
+        return table.locate(token_pos = token_pos)
