@@ -8,11 +8,12 @@ from .request import Request
 from .types import KVCache
 from .sampler import Sampler
 from .model_runner import ModelRunner
-
+from .block_manager import BlockManager
 
 class Scheduler:
     def __init__(self,
                  model: torch.nn.Module,
+                 block_manager: BlockManager,
                  sampler: Sampler | None = None,
         ):
         self.waiting: deque[Request] = deque()
@@ -22,6 +23,7 @@ class Scheduler:
         self._next_inputs: dict[str, torch.Tensor] = {}
         self._samplers: dict[str, Sampler] = {}
         self.runner = ModelRunner(model)
+        self.block_manager = block_manager
         self.default_sampler = sampler or Sampler()
         # Match the model's device so input tensors don't trigger device-mismatch errors.
         self._device = next(model.parameters()).device
@@ -51,6 +53,10 @@ class Scheduler:
                 return finished
 
             request.mark_prefilling()
+            self.block_manager.allocate_for_request(
+                request_id = request.request_id,
+                num_tokens = len(request.input_ids)
+            )
             input_tensor = torch.tensor(
                 [request.input_ids], dtype=torch.long, device=self._device,
             )
@@ -68,6 +74,7 @@ class Scheduler:
         sampler = self._samplers[request.request_id]
         token = sampler.sample(output.logits)
         request.append_token(token.item())
+        self.block_manager.append_token(request.request_id)
         self._kv_caches[request.request_id] = output.kv_cache
         self._next_inputs[request.request_id] = token
 
@@ -77,6 +84,7 @@ class Scheduler:
             del self._kv_caches[request.request_id]
             del self._next_inputs[request.request_id]
             del self._samplers[request.request_id]
+            self.block_manager.free_request(request.request_id)
         else:
             self.running.append(request)
 

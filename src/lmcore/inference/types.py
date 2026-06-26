@@ -3,9 +3,8 @@ from dataclasses import dataclass
 
 import torch
 
-KVCache = tuple[tuple[torch.Tensor, torch.Tensor], ...]
 
 @dataclass(slots=True)
 class RunnerOutput:
     logits: torch.Tensor
-    kv_cache: KVCache
+    # kv_cache removed — KV is stored in the global KVPool, accessed via PagedKVCache.

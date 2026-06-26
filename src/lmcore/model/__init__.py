@@ -8,11 +8,19 @@ from torch import nn
 
 from .block import Block
 from ..config import ModelConfig
-from ..inference.sampler import Sampler, SamplingParams
 
 
 class GPTMini(nn.Module):
-    """Minimal decoder-only Transformer."""
+    """Minimal decoder-only Transformer.
+
+    Training::
+
+        logits, loss = model(idx, targets=targets)
+
+    Inference with paged KV cache::
+
+        logits, _ = model(idx, use_cache=True, kv_cache=paged_kv)
+    """
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
@@ -23,18 +31,17 @@ class GPTMini(nn.Module):
         self.token_embedding_table = nn.Embedding(config.vocab_size, config.n_embd)
         self.position_embedding_table = nn.Embedding(config.block_size, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
-        self.blocks = nn.ModuleList(
-            [
-                Block(
-                    n_embd=config.n_embd,
-                    n_head=config.n_head,
-                    block_size=config.block_size,
-                    dropout=config.dropout,
-                    bias=config.bias,
-                )
-                for _ in range(config.n_layer)
-            ]
-        )
+        self.blocks = nn.ModuleList([
+            Block(
+                n_embd=config.n_embd,
+                n_head=config.n_head,
+                block_size=config.block_size,
+                dropout=config.dropout,
+                bias=config.bias,
+                layer_idx=i,
+            )
+            for i in range(config.n_layer)
+        ])
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
@@ -42,48 +49,28 @@ class GPTMini(nn.Module):
         self,
         idx: torch.Tensor,
         targets: torch.Tensor | None = None,
-        past_key_values: tuple[tuple[torch.Tensor, torch.Tensor], ...] | None = None,
         use_cache: bool = False,
-    ) -> tuple[torch.Tensor, 
-               torch.Tensor | None,
-               tuple[tuple[torch.Tensor, torch.Tensor], ...] | None,
-        ]:
+        kv_cache: object | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, S = idx.shape
 
-        past_length = 0
-        if past_key_values is not None:
-            past_length = past_key_values[0][0].size(2)
-        positions = torch.arange(past_length, past_length+S, device=idx.device)
-        
-        if past_length + S > self.config.block_size:
-            raise ValueError( 
-                f"Sequence length {S} exceeds block_size={self.config.block_size}."
+        past_length = kv_cache.num_tokens if kv_cache is not None else 0
+        total_length = past_length + S
+        if total_length > self.config.block_size:
+            raise ValueError(
+                f"Sequence length {total_length} exceeds "
+                f"block_size={self.config.block_size}."
             )
-        
+
+        positions = torch.arange(past_length, total_length, device=idx.device)
         tok_emb = self.token_embedding_table(idx)
         pos_emb = self.position_embedding_table(positions)
+        x = self.dropout(tok_emb + pos_emb)
 
-        x = tok_emb + pos_emb
-        x = self.dropout(x)
-        
-        presents = [] if use_cache else None
-        
-        for layer_idx, block in enumerate(self.blocks):
-            layer_past = None
-            if past_key_values is not None:
-                layer_past = past_key_values[layer_idx] 
-            
-            x, present = block(
-                x,
-                layer_past = layer_past,
-                use_cache=use_cache,
-            )
-            
-            if use_cache:
-                presents.append(present)
-         
+        for block in self.blocks:
+            x = block(x, use_cache=use_cache, kv_cache=kv_cache)
+
         x = self.ln_f(x)
-
         logits = self.lm_head(x)
 
         loss = None
@@ -92,31 +79,4 @@ class GPTMini(nn.Module):
             targets_flat = targets.reshape(B * S)
             loss = F.cross_entropy(logits_flat, targets_flat)
 
-        return logits, loss, tuple(presents) if use_cache else None
-
-    @torch.no_grad()
-    def generate(
-        self,
-        idx: torch.Tensor,
-        max_new_tokens: int,
-        temperature: float = 1.0,
-        top_k: int | None = None,
-    ) -> torch.Tensor:
-        # prefill stage
-        logits, _, past_key_value = self(idx[:, -self.config.block_size :], use_cache = True)
-        sampler = Sampler(
-                SamplingParams(
-                    temperature=temperature,
-                    top_k=top_k,
-                )
-            )
-        for _ in range(max_new_tokens):
-            idx_next = sampler.sample(logits)
-            
-            idx = torch.cat((idx, idx_next), dim=1)
-            logits, _, past_key_value = self(
-                idx_next,
-                past_key_values = past_key_value,
-                use_cache = True,
-            )
-        return idx
+        return logits, loss
