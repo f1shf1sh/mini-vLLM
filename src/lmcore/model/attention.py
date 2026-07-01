@@ -113,7 +113,7 @@ class MultiHeadAttention(nn.Module):
         v_new = v_new.view(B, S, self.n_head, self.head_size).transpose(1, 2)
 
         if use_cache and kv_cache is not None:
-            past_len = kv_cache.num_tokens - S
+            past_len = max(0, kv_cache.num_tokens - S)
             k_past, v_past = kv_cache.gather(self.layer_idx, past_len)
             k = torch.cat([k_past, k_new], dim=2)
             v = torch.cat([v_past, v_new], dim=2)

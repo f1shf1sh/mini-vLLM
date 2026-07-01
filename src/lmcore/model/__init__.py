@@ -56,7 +56,7 @@ class GPTMini(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, S = idx.shape
 
-        past_length = kv_cache.num_tokens if kv_cache is not None else 0
+        past_length = max(0, kv_cache.num_tokens - S) if kv_cache is not None else 0
         total_length = past_length + S
         if total_length > self.config.block_size:
             raise ValueError(
