@@ -157,11 +157,15 @@ uv run python scripts/benchmark_memory.py
 uv run python scripts/benchmark_live.py
 ```
 
+## Related docs
+
+- [Benchmark results](docs/benchmark.md) — contiguous vs paged KV cache memory comparison
+
 ---
 
 ## AI participation
 
-This project was developed with AI assistance (Claude Code).
+This project was developed with AI assistance.
 AI contributed to code review, design discussion, documentation,
 test writing, and benchmark scripts.  All architectural decisions
 and implementation were reviewed and approved by the author.
