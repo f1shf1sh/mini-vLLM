@@ -26,19 +26,15 @@ class GPTMini(nn.Module):
         super().__init__()
         if config.vocab_size <= 0:
             raise ValueError("config.vocab_size must be positive.")
-
         self.config = config
         self.token_embedding_table = nn.Embedding(config.vocab_size, config.n_embd)
         self.position_embedding_table = nn.Embedding(config.block_size, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList([
             Block(
-                n_embd=config.n_embd,
-                n_head=config.n_head,
-                block_size=config.block_size,
-                dropout=config.dropout,
-                bias=config.bias,
-                layer_idx=i,
+                n_embd=config.n_embd, n_head=config.n_head,
+                block_size=config.block_size, dropout=config.dropout,
+                bias=config.bias, layer_idx=i,
             )
             for i in range(config.n_layer)
         ])
@@ -46,11 +42,8 @@ class GPTMini(nn.Module):
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
     def forward(
-        self,
-        idx: torch.Tensor,
-        targets: torch.Tensor | None = None,
-        use_cache: bool = False,
-        kv_cache: object | None = None,
+        self, idx: torch.Tensor, targets: torch.Tensor | None = None,
+        use_cache: bool = False, kv_cache: object | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         B, S = idx.shape
 

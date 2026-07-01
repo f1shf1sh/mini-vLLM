@@ -8,18 +8,15 @@ from .block_manager import BlockManager
 
 
 class ModelRunner:
-    """Thin inference wrapper around GPTMini.forward().
+    """Inference wrapper around GPTMini.forward() with paged KV cache.
 
-    Uses PagedKVCache so the model reads/writes KV directly from
-    the global KVPool via block tables.  No contiguous KV cache is
-    returned or managed by the caller.
+    The runner only creates PagedKVCache from existing block tables
+    and executes the model.  Block lifecycle (allocate / append / free)
+    is managed by the caller (Scheduler).
     """
 
     def __init__(
-        self,
-        model: torch.nn.Module,
-        kv_pool: KVPool,
-        block_manager: BlockManager,
+        self, model: torch.nn.Module, kv_pool: KVPool, block_manager: BlockManager,
     ) -> None:
         self.model = model
         self.kv_pool = kv_pool
@@ -29,10 +26,8 @@ class ModelRunner:
     def _make_kv_cache(self, request_id: str) -> PagedKVCache:
         table = self.block_manager.block_tables[request_id]
         return PagedKVCache(
-            pool=self.kv_pool,
-            block_table=table,
-            n_head=self.kv_pool.num_heads,
-            head_dim=self.kv_pool.head_dim,
+            pool=self.kv_pool, block_table=table,
+            n_head=self.kv_pool.num_heads, head_dim=self.kv_pool.head_dim,
         )
 
     @torch.no_grad()
@@ -42,14 +37,8 @@ class ModelRunner:
         if input_ids.size(1) < 1:
             raise ValueError("prefill expects at least one token.")
 
-        self.block_manager.allocate_for_request(request_id, input_ids.size(1))
         kv_cache = self._make_kv_cache(request_id)
-
-        logits, _ = self.model(
-            input_ids,
-            use_cache=True,
-            kv_cache=kv_cache,
-        )
+        logits, _ = self.model(input_ids, use_cache=True, kv_cache=kv_cache)
         return RunnerOutput(logits=logits)
 
     @torch.no_grad()
@@ -59,12 +48,6 @@ class ModelRunner:
         if input_ids.size(1) != 1:
             raise ValueError("decode expects exactly one token per request.")
 
-        self.block_manager.append_token(request_id)
         kv_cache = self._make_kv_cache(request_id)
-
-        logits, _ = self.model(
-            input_ids,
-            use_cache=True,
-            kv_cache=kv_cache,
-        )
+        logits, _ = self.model(input_ids, use_cache=True, kv_cache=kv_cache)
         return RunnerOutput(logits=logits)
