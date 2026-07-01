@@ -16,7 +16,10 @@ class ModelRunner:
     """
 
     def __init__(
-        self, model: torch.nn.Module, kv_pool: KVPool, block_manager: BlockManager,
+        self,
+        model: torch.nn.Module,
+        kv_pool: KVPool,
+        block_manager: BlockManager,
     ) -> None:
         self.model = model
         self.kv_pool = kv_pool
@@ -26,8 +29,10 @@ class ModelRunner:
     def _make_kv_cache(self, request_id: str) -> PagedKVCache:
         table = self.block_manager.block_tables[request_id]
         return PagedKVCache(
-            pool=self.kv_pool, block_table=table,
-            n_head=self.kv_pool.num_heads, head_dim=self.kv_pool.head_dim,
+            pool=self.kv_pool,
+            block_table=table,
+            n_head=self.kv_pool.num_heads,
+            head_dim=self.kv_pool.head_dim,
         )
 
     @torch.no_grad()
