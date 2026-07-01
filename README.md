@@ -39,12 +39,12 @@ The core of the project. Implements the vLLM paper mechanisms:
 | module | role | paper section |
 |--------|------|---------------|
 | `block_manager.py` | `BlockTable`, `BlockAllocator`, `BlockManager` | 4.1, 4.2 |
-| `kv_pool.py` | `KVPool` — global physical KV storage | 4.1 |
+| `kv_pool.py` | `KVPool`, `PagedKVCache` — global pool + per-request handle | 4.1 |
 | `scheduler.py` | `Scheduler` — FIFO waiting + round-robin decode | 4.5 |
 | `model_runner.py` | `ModelRunner` — prefill / decode entry points | 4.3 |
 | `request.py` | `Request` lifecycle (WAITING → PREFILLING → DECODING → FINISHED) | |
 | `sampler.py` | Temperature / top-k token sampling | |
-| `generator.py` | Single-request cached generation | |
+| `generator.py` | ~~CachedGenerator~~ (not yet refactored for paged KV) | |
 
 ### 3. Training & checkpoint layer
 
@@ -65,20 +65,24 @@ The core of the project. Implements the vLLM paper mechanisms:
 - **pure PyTorch** — no CUDA kernels. Paged storage + contiguous compute (gather before attention). Functionally correct, not performance-competitive.
 - **dependency injection** — `BlockManager` receives an `allocator`, not a `num_blocks` integer. Components are testable in isolation.
 
-## Data flow (paged path, work in progress)
+## Data flow (paged path)
 
 ```text
 Prefill:
-  ModelRunner.prefill(prompt, request_id)
-  → block_manager.allocate_for_request(request_id, prompt_len)
-  → model(input_ids, kv_pool, block_table)
-  → attention writes K/V directly into pool blocks
+  Scheduler.allocate_for_request(req, prompt_len)   ← allocate blocks
+  → ModelRunner.prefill(prompt, request_id)
+  → model(input_ids, use_cache=True, kv_cache=paged_kv)
+  → attention writes K/V directly into pool blocks at start_pos=0
 
 Decode:
-  ModelRunner.decode(token, request_id)
-  → block_manager.append_token(request_id)
-  → model(token, kv_pool, block_table, num_past_tokens)
-  → attention reads past K/V from pool, writes new token's K/V to pool
+  Scheduler.append_token(req)   ← extend block table
+  → ModelRunner.decode(token, request_id)
+  → model(token, use_cache=True, kv_cache=paged_kv)
+  → attention: past = num_tokens-S, reads past K/V from pool,
+    writes new token's K/V at start_pos=past
+
+Cleanup:
+  Scheduler.free_request(req)   ← return blocks to allocator
 ```
 
 ## Directory
@@ -88,6 +92,9 @@ mini-vllm/
 ├── configs/base.yaml
 ├── data/input.txt
 ├── outputs/
+├── scripts/
+│   ├── benchmark_memory.py   # pure calculation
+│   └── benchmark_live.py     # live scheduler tracking
 ├── docs/
 │   ├── benchmark.md
 │   ├── module_notes.md
@@ -110,7 +117,7 @@ mini-vllm/
 │   │   ├── generator.py       # CachedGenerator
 │   │   ├── request.py         # Request, RequestStatus
 │   │   ├── sampler.py         # Sampler, SamplingParams
-│   │   └── types.py           # KVCache, RunnerOutput
+│   │   └── types.py           # RunnerOutput
 │   └── runtime/
 │       ├── train.py
 │       └── generate.py
@@ -144,20 +151,18 @@ uv run lmcore-train --config configs/base.yaml
 
 # Generate from a checkpoint
 uv run lmcore-generate --ckpt outputs/ckpt.pt --prompt "hello"
+
+# Run benchmarks
+uv run python scripts/benchmark_memory.py
+uv run python scripts/benchmark_live.py
 ```
 
-## Current status
+---
 
-```text
-✅ GPTMini model + training + checkpoint
-✅ KV-cache-aware forward
-✅ Prefill / decode split (ModelRunner)
-✅ CachedGenerator
-✅ Request lifecycle
-✅ Scheduler (FIFO + round-robin)
-✅ BlockTable, BlockAllocator, BlockManager
-✅ KVPool (physical storage)
-🚧 Paged-aware attention (attention reads/writes pool directly)
-📋 Scheduler ↔ BlockManager integration
-📋 Benchmark: contiguous vs paged memory efficiency
-```
+## AI participation
+
+This project was developed with AI assistance (Claude Code).
+AI contributed to code review, design discussion, documentation,
+test writing, and benchmark scripts.  All architectural decisions
+and implementation were reviewed and approved by the author.
+
