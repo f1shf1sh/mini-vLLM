@@ -66,3 +66,30 @@ def test_kv_grows_during_decode():
     runner.decode(torch.tensor([[4]]), request_id="test")
     table = runner.block_manager.block_tables["test"]
     assert table.num_tokens == 4
+
+
+def test_paged_logits_match_full_forward_across_noncontiguous_blocks():
+    torch.manual_seed(0)
+    runner, _ = _make_runner()
+    input_ids = torch.tensor([[1, 2, 3, 4, 5, 6, 7]])
+    with torch.no_grad():
+        expected_logits, _ = runner.model(input_ids)
+
+    prompt_length = 3
+    runner.block_manager.allocate_for_request("test", prompt_length)
+    actual = runner.prefill(input_ids[:, :prompt_length], request_id="test")
+    torch.testing.assert_close(actual.logits, expected_logits[:, :prompt_length])
+
+    # Another request occupies the next physical block, so decode must follow
+    # the block table when the first request grows beyond its initial block.
+    runner.block_manager.allocate_for_request("other", 4)
+    for token_pos in range(prompt_length, input_ids.size(1)):
+        runner.block_manager.append_token("test")
+        actual = runner.decode(input_ids[:, token_pos : token_pos + 1], request_id="test")
+        torch.testing.assert_close(
+            actual.logits, expected_logits[:, token_pos : token_pos + 1]
+        )
+
+    table = runner.block_manager.block_tables["test"]
+    assert table.num_tokens == input_ids.size(1)
+    assert table.physical_blocks == [0, 2]

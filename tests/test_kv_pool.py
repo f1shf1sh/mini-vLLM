@@ -1,6 +1,8 @@
 import torch
+import pytest
 
-from lmcore.inference.kv_pool import KVPool
+from lmcore.inference.block_manager import BlockAllocator, BlockManager
+from lmcore.inference.kv_pool import KVPool, PagedKVCache
 
 
 def _make_pool(num_blocks: int = 10) -> KVPool:
@@ -93,3 +95,23 @@ def test_pool_shape():
     pool = _make_pool(num_blocks=8)
     assert pool.pool.shape == (2, 2, 8, 2, 4, 4)
     # layers=2, K/V=2, blocks=8, heads=2, block_size=4, dim=4
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param(
+    "cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable"),
+)])
+def test_gather_preserves_pool_device_dtype_and_values(device):
+    pool = KVPool(2, 1, 2, 4, 4, device=device, dtype=torch.float64)
+    manager = BlockManager(BlockAllocator(2), 4)
+    manager.allocate_for_request("r", 5)
+    cache = PagedKVCache(pool, manager.block_tables["r"], 2, 4)
+    expected_k = torch.randn(1, 2, 5, 4, device=device, dtype=torch.float64)
+    expected_v = torch.randn_like(expected_k)
+    cache.write_range(0, expected_k, expected_v)
+    for count in (0, 5):
+        k, v = cache.gather(0, count)
+        assert k.device == expected_k.device
+        assert v.device == expected_v.device
+        assert k.dtype == v.dtype == torch.float64
+        assert torch.equal(k, expected_k[:, :, :count])
+        assert torch.equal(v, expected_v[:, :, :count])

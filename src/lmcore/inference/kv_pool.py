@@ -25,6 +25,9 @@ class KVPool:
         num_heads: int,
         block_size: int,
         head_dim: int,
+        *,
+        device: torch.device | str | None = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         self.num_blocks = num_blocks
         self.num_layers = num_layers
@@ -34,6 +37,7 @@ class KVPool:
 
         self.pool = torch.zeros(
             num_layers, 2, num_blocks, num_heads, block_size, head_dim,
+            device=device, dtype=dtype,
         )
 
     def write(
@@ -123,10 +127,10 @@ class PagedKVCache:
         """
         if num_past == 0:
             return (
-                torch.empty(1, self._n_head, 0, self._head_dim),
-                torch.empty(1, self._n_head, 0, self._head_dim),
+                self._pool.pool.new_empty(1, self._n_head, 0, self._head_dim),
+                self._pool.pool.new_empty(1, self._n_head, 0, self._head_dim),
             )
-        k = torch.empty(1, self._n_head, num_past, self._head_dim)
+        k = self._pool.pool.new_empty(1, self._n_head, num_past, self._head_dim)
         v = torch.empty_like(k)
         for pos in range(num_past):
             kp, vp = self.read(layer, pos)
