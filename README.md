@@ -1,172 +1,114 @@
-# mini-vllm
+# mini-vLLM
 
-A teaching-level reimplementation of the core mechanisms from the vLLM paper:
+A pure-PyTorch teaching implementation of paged KV storage, prefill/decode
+execution, and request scheduling. A small GPT model provides a controllable
+testbed. Pretrained Qwen loading and continuous batching are future work.
 
-> *Efficient Memory Management for Large Language Model Serving with PagedAttention* (Kwon et al., SOSP 2023).
+## Layout
 
-The project uses a self-trained toy GPT model as a controllable testbed — the model is not the focus. The focus is the **inference runtime**: PagedAttention, KV cache management, and request scheduling.
+- `src/llm/inference/`: block allocation, KV storage, scheduling, sampling.
+- `src/llm/model/`: toy GPT model.
+- `src/llm/runtime/`: training and generation CLI.
+- `tests/`: production regression tests.
+- `configs/`: CPU and CUDA training configurations.
+- `docker/`: GPU image and container development entry.
+- `benchmarks/`: KV memory and scheduler block-usage experiments.
+- `examples/`: checkpoint-based paged inference demo.
+- `tools/`: dataset preparation.
+- `data/` and `outputs/`: datasets and generated artifacts.
+- Personal lessons and detailed documentation stay in Git-ignored `.local/`.
 
-## Scope
+## Develop in the existing GPU container
 
-**In scope (paper Section 4):**
-
-- 4.1 PagedAttention — block table, logical-to-physical mapping, paged KV storage
-- 4.2 KV Cache Manager — block allocator, lifecycle, allocation / free
-- 4.3 LLM Serving — paged-aware attention, ModelRunner with prefill / decode
-- 4.5 Scheduling — arrival-order scheduling, round-robin decode
-
-**Out of scope (intentionally):**
-
-- Preemption (swap / recomputation)
-- Distributed execution (tensor parallelism)
-- Prefix caching, copy-on-write, beam search sharing
-- CUDA / Triton kernels (pure PyTorch)
-- Speculative decoding
-- HuggingFace model weight loading
-
-## Architecture
-
-The project has five layers:
-
-### 1. Model layer (`model/`)
-
-A minimal decoder-only Transformer (`GPTMini`) — used only as a controllable testbed. It produces token logits and exposes the standard `forward(input_ids)` interface, making the inference runtime testable with tiny configs.
-
-### 2. Inference runtime layer (`inference/`)
-
-The core of the project. Implements the vLLM paper mechanisms:
-
-| module | role | paper section |
-|--------|------|---------------|
-| `block_manager.py` | `BlockTable`, `BlockAllocator`, `BlockManager` | 4.1, 4.2 |
-| `kv_pool.py` | `KVPool`, `PagedKVCache` — global pool + per-request handle | 4.1 |
-| `scheduler.py` | `Scheduler` — FIFO waiting + round-robin decode | 4.5 |
-| `model_runner.py` | `ModelRunner` — prefill / decode entry points | 4.3 |
-| `request.py` | `Request` lifecycle (WAITING → PREFILLING → DECODING → FINISHED) | |
-| `sampler.py` | Temperature / top-k token sampling | |
-| `generator.py` | ~~CachedGenerator~~ (not yet refactored for paged KV) | |
-
-### 3. Training & checkpoint layer
-
-`config.py`, `tokenizer.py` (character-level), `dataset.py`, `checkpoint.py` — enough to train the toy GPT so the inference layer has something to serve.
-
-### 4. CLI layer (`runtime/`)
-
-`train.py` and `generate.py` — thin entry points.
-
-### 5. Docs & tests
-
-`docs/`, `tests/` — shape-flow reference, module notes, and unit tests covering correctness of KV cache, block management, request scheduling, and paged storage.
-
-## Key design decisions
-
-- **toy GPT as testbed** — tiny configs (`n_layer=2, n_head=2, n_embd=16, block_size=8`) let tests run in milliseconds. The model is not a product.
-- **paged KV cache first, continuous batching second** — block management must be correct before scheduling gets complex.
-- **pure PyTorch** — no CUDA kernels. Paged storage + contiguous compute (gather before attention). Functionally correct, not performance-competitive.
-- **dependency injection** — `BlockManager` receives an `allocator`, not a `num_blocks` integer. Components are testable in isolation.
-
-## Data flow (paged path)
-
-```text
-Prefill:
-  Scheduler.allocate_for_request(req, prompt_len)   ← allocate blocks
-  → ModelRunner.prefill(prompt, request_id)
-  → model(input_ids, use_cache=True, kv_cache=paged_kv)
-  → attention writes K/V directly into pool blocks at start_pos=0
-
-Decode:
-  Scheduler.append_token(req)   ← extend block table
-  → ModelRunner.decode(token, request_id)
-  → model(token, use_cache=True, kv_cache=paged_kv)
-  → attention: past = num_tokens-S, reads past K/V from pool,
-    writes new token's K/V at start_pos=past
-
-Cleanup:
-  Scheduler.free_request(req)   ← return blocks to allocator
-```
-
-## Directory
-
-```text
-mini-vllm/
-├── configs/base.yaml
-├── data/input.txt
-├── outputs/
-├── scripts/
-│   ├── benchmark_memory.py   # pure calculation
-│   └── benchmark_live.py     # live scheduler tracking
-├── docs/
-│   ├── benchmark.md
-│   ├── module_notes.md
-│   ├── project-plan.md
-│   └── shape_flow.md
-├── src/llm/
-│   ├── config.py
-│   ├── checkpoint.py
-│   ├── tokenizer.py
-│   ├── dataset.py
-│   ├── model/
-│   │   ├── __init__.py        # GPTMini
-│   │   ├── attention.py       # MultiHeadAttention
-│   │   └── block.py           # Block, FeedForward
-│   ├── inference/
-│   │   ├── block_manager.py   # BlockTable, BlockAllocator, BlockManager
-│   │   ├── kv_pool.py         # KVPool
-│   │   ├── scheduler.py       # Scheduler
-│   │   ├── model_runner.py    # ModelRunner
-│   │   ├── generator.py       # CachedGenerator
-│   │   ├── request.py         # Request, RequestStatus
-│   │   ├── sampler.py         # Sampler, SamplingParams
-│   │   └── types.py           # RunnerOutput
-│   └── runtime/
-│       ├── train.py
-│       └── generate.py
-└── tests/
-    ├── test_block_manager.py
-    ├── test_kv_pool.py
-    ├── test_scheduler.py
-    ├── test_model_runner.py
-    ├── test_generator.py
-    ├── test_model.py
-    ├── test_attention.py
-    ├── test_block.py
-    ├── test_request.py
-    ├── test_sampler.py
-    ├── test_checkpoint.py
-    ├── test_config.py
-    └── test_tokenizer.py
-```
-
-## Commands
+On the Linux host, run from the repository root:
 
 ```bash
-# Install dependencies
-uv sync --group dev
-
-# Run all tests
-uv run pytest
-
-# Train the toy GPT
-uv run llm-train --config configs/base.yaml
-
-# Generate from a checkpoint
-uv run llm-generate --ckpt outputs/ckpt.pt --prompt "hello"
-
-# Run benchmarks
-uv run python scripts/benchmark_memory.py
-uv run python scripts/benchmark_live.py
+./docker/dev.sh shell
 ```
 
-## Related docs
+Inside the container:
 
-- [Benchmark results](docs/benchmark.md) — contiguous vs paged KV cache memory comparison
+```bash
+python -m pytest tests -q
+llm-train --config configs/base.yaml
+llm-generate --ckpt outputs/ckpt.pt --prompt "hello"
+python benchmarks/kv_memory.py
+python benchmarks/block_usage.py
+```
 
----
+Or run one command from the host: `./docker/dev.sh python -m pytest tests -q`.
+The helper starts a stopped container, but never creates one or installs packages.
+Set `MINIVLLM_CONTAINER` to select a container other than `mini-vllm-dev`.
 
-## AI participation
+## Build an environment for a new container
 
-This project was developed with AI assistance.
-AI contributed to code review, design discussion, documentation,
-test writing, and benchmark scripts.  All architectural decisions
-and implementation were reviewed and approved by the author.
+Skip this section when the existing environment already works.
+Requires Docker with NVIDIA GPU support. Use an unused container name.
 
+```bash
+docker build -f docker/Dockerfile \
+  --build-arg DEV_UID="$(id -u)" \
+  --build-arg DEV_GID="$(id -g)" \
+  -t mini-vllm:dev .
+
+mkdir -p "$HOME/models"
+docker run -d --name mini-vllm-dev --gpus device=0 --shm-size=2g \
+  --mount "type=bind,src=$PWD,dst=/workspace/mini-vLLM" \
+  --mount "type=bind,src=$HOME/models,dst=/models,readonly" \
+  --restart unless-stopped mini-vllm:dev
+```
+
+`docker/Dockerfile` owns container versions and installation. It inherits the base
+image's CUDA PyTorch, installs the project in `/opt/venv`, and creates a user
+matching the host UID/GID with writable `/home/dev`.
+`pyproject.toml` declares Python package metadata and dependency requirements;
+`uv.lock` is retained for standalone uv workflows, not used to replace container
+PyTorch. The development Python version is 3.12 (package minimum: 3.11).
+Rebuild the image after changing container dependencies.
+
+Keep model weights outside the Git repository. The mount above exposes
+`$HOME/models/Qwen2.5-0.5B-Instruct` as `/models/Qwen2.5-0.5B-Instruct`.
+An existing container needs recreation to add a new bind mount; retain its
+environment and data until the replacement has been verified.
+
+## Attach an editor
+
+Connect to the Linux host with VS Code Remote - SSH, then run
+`Dev Containers: Attach to Running Container...` and open
+`/workspace/mini-vLLM`. Select `/opt/venv/bin/python`.
+
+For the existing container, save these values through
+`Dev Containers: Open Named Configuration File`:
+
+```json
+{
+  "workspaceFolder": "/workspace/mini-vLLM",
+  "settings": {
+    "python.defaultInterpreterPath": "/opt/venv/bin/python"
+  },
+  "remoteEnv": {
+    "HOME": "/home/dev",
+    "PATH": "/opt/venv/bin:${containerEnv:PATH}",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  }
+}
+```
+
+## CUDA training and inference demo
+
+On the host, download the dataset and run the workload in the container:
+
+```bash
+./tools/download_data.sh
+./docker/dev.sh llm-train --config configs/cuda.yaml
+./docker/dev.sh python examples/paged_inference.py --device cuda
+```
+
+Training writes `outputs/ckpt.pt`; select another output directory in the
+configuration to retain an earlier checkpoint. The character tokenizer and toy
+GPT are not compatible with Qwen pretrained weights.
+
+This project gathers paged K/V for attention computation; it does not implement
+custom CUDA kernels or production serving.
+
+Developed with AI assistance.

@@ -31,3 +31,11 @@ data/*.pkl
 
 # macOS
 .DS_Store
+
+# Local-only learning materials, detailed docs, and assistant guidance
+/.local/
+/CLAUDE.md
+
+# Downloaded model weights belong outside the repository
+/models/
+*.safetensors
