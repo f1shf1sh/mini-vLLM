@@ -1,0 +1,28 @@
+model:
+  vocab_size: 0
+  block_size: 256
+  n_layer: 2
+  n_head: 4
+  n_embd: 128
+  dropout: 0.1
+  bias: false
+
+training:
+  batch_size: 32
+  learning_rate: 0.001
+  weight_decay: 0.01
+  max_iters: 1000
+  eval_interval: 100
+  eval_iters: 10
+  train_split: 0.9
+  device: cuda
+  seed: 42
+
+generation:
+  max_new_tokens: 128
+  temperature: 0.8
+  top_k: 20
+
+paths:
+  input_text: data/tinyshakespeare.txt
+  output_dir: outputs
