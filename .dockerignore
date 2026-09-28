@@ -1,0 +1,24 @@
+# Build context is the repository root: docker build -f docker/Dockerfile .
+**
+!.dockerignore
+!docker/
+!docker/Dockerfile
+!pyproject.toml
+!README.md
+!src/
+!src/**
+!configs/
+!configs/**
+!tests/
+!tests/**
+!benchmarks/
+!benchmarks/**
+!examples/
+!examples/**
+!tools/
+!tools/**
+!data/
+!data/input.txt
+
+**/__pycache__/
+**/*.py[cod]
