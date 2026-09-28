@@ -16,7 +16,7 @@ class Request:
     request_id: str
     input_ids: list[int]
     max_new_tokens: int
-    sampling_params: SamplingParams = field(default_factory=SamplingParams)
+    sampling_params: SamplingParams | None = field(default_factory=SamplingParams)
     generated_ids: list[int] = field(default_factory=list)
     status: RequestStatus = RequestStatus.WAITING
     

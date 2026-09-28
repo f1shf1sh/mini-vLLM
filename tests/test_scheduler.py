@@ -1,4 +1,5 @@
 import torch
+import pytest
 
 from lmcore.config import ModelConfig
 from lmcore.inference.block_manager import BlockManager, BlockAllocator
@@ -240,3 +241,46 @@ def test_per_request_sampling_params_used():
     while not s.is_done:
         s.step()
     assert len(s.finished[0].output_ids) == 6
+
+
+def test_final_sample_at_block_boundary_does_not_allocate_unused_block():
+    model = make_model()
+    pool = KVPool(1, model.config.n_layer, model.config.n_head, 4, 4)
+    manager = BlockManager(BlockAllocator(1), 4)
+    scheduler = Scheduler(model, pool, manager)
+    scheduler.add_request(Request("boundary", [1, 2, 3, 4], 1))
+    assert len(scheduler.step()) == 1
+    assert manager.allocator.num_free == 1
+    assert not manager.block_tables
+
+
+def test_waiting_request_is_deferred_until_decode_releases_capacity():
+    model = make_model()
+    pool = KVPool(2, model.config.n_layer, model.config.n_head, 4, 4)
+    manager = BlockManager(BlockAllocator(2), 4)
+    scheduler = Scheduler(model, pool, manager)
+    for request_id in ("first", "second"):
+        scheduler.add_request(Request(request_id, [1, 2, 3], 4))
+    scheduler.step()
+    assert len(scheduler.running) == 1
+    assert len(scheduler.waiting) == 1
+    scheduler.step()
+    assert scheduler.running[0].num_generated_tokens == 2
+    assert len(scheduler.waiting) == 1
+    while not scheduler.is_done:
+        scheduler.step()
+    assert [r.request_id for r in scheduler.finished] == ["first", "second"]
+    assert manager.allocator.num_free == 2
+
+
+@pytest.mark.parametrize("input_ids,max_new_tokens,match", [
+    ([1], -1, "nonnegative"),
+    ([], 1, "prompt token"),
+    ([1] * 8, 2, "exceeding"),
+])
+def test_invalid_request_is_rejected_before_allocation(input_ids, max_new_tokens, match):
+    scheduler = _make_scheduler()
+    with pytest.raises(ValueError, match=match):
+        scheduler.add_request(Request("invalid", input_ids, max_new_tokens))
+    assert scheduler.is_done
+    assert not scheduler.block_manager.block_tables
