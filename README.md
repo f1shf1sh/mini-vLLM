@@ -100,7 +100,7 @@ mini-vllm/
 │   ├── module_notes.md
 │   ├── project-plan.md
 │   └── shape_flow.md
-├── src/lmcore/
+├── src/llm/
 │   ├── config.py
 │   ├── checkpoint.py
 │   ├── tokenizer.py
@@ -147,10 +147,10 @@ uv sync --group dev
 uv run pytest
 
 # Train the toy GPT
-uv run lmcore-train --config configs/base.yaml
+uv run llm-train --config configs/base.yaml
 
 # Generate from a checkpoint
-uv run lmcore-generate --ckpt outputs/ckpt.pt --prompt "hello"
+uv run llm-generate --ckpt outputs/ckpt.pt --prompt "hello"
 
 # Run benchmarks
 uv run python scripts/benchmark_memory.py

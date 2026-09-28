@@ -122,7 +122,7 @@ wheels = [
 ]
 
 [[package]]
-name = "lmcore"
+name = "mini-vllm"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

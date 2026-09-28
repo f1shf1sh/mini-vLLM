@@ -1,5 +1,5 @@
-from lmcore.inference.request import Request, RequestStatus
-from lmcore.inference.sampler import SamplingParams
+from llm.inference.request import Request, RequestStatus
+from llm.inference.sampler import SamplingParams
 
 
 def test_request_defaults_to_waiting() -> None:

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lmcore"
+name = "mini-vllm"
 version = "0.1.0"
 description = "Minimal inference infra learning scaffold."
 readme = "README.md"
@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-lmcore-train = "lmcore.runtime.train:main"
-lmcore-generate = "lmcore.runtime.generate:main"
+llm-train = "llm.runtime.train:main"
+llm-generate = "llm.runtime.generate:main"
 
 [dependency-groups]
 dev = [
@@ -26,3 +26,6 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm"]

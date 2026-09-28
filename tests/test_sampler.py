@@ -1,6 +1,6 @@
 import torch
 
-from lmcore.inference.sampler import Sampler, SamplingParams
+from llm.inference.sampler import Sampler, SamplingParams
 
 
 def test_sampler_returns_one_token_per_batch_item() -> None:

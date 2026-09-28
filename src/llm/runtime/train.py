@@ -17,7 +17,7 @@ from ..utils import set_seed, timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Training scaffold for lmcore.")
+    parser = argparse.ArgumentParser(description="Training scaffold for llm.")
     parser.add_argument(
         "--config",
         default="configs/base.yaml",

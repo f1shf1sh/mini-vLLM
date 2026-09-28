@@ -1,8 +1,8 @@
 import torch
 import pytest
 
-from lmcore.inference.block_manager import BlockAllocator, BlockManager
-from lmcore.inference.kv_pool import KVPool, PagedKVCache
+from llm.inference.block_manager import BlockAllocator, BlockManager
+from llm.inference.kv_pool import KVPool, PagedKVCache
 
 
 def _make_pool(num_blocks: int = 10) -> KVPool:

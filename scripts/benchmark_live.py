@@ -2,13 +2,13 @@
 import random
 import torch
 
-from lmcore.config import ModelConfig
-from lmcore.inference.block_manager import BlockManager, BlockAllocator
-from lmcore.inference.kv_pool import KVPool
-from lmcore.inference.request import Request
-from lmcore.inference.scheduler import Scheduler
-from lmcore.inference.sampler import SamplingParams
-from lmcore.model import GPTMini
+from llm.config import ModelConfig
+from llm.inference.block_manager import BlockManager, BlockAllocator
+from llm.inference.kv_pool import KVPool
+from llm.inference.request import Request
+from llm.inference.scheduler import Scheduler
+from llm.inference.sampler import SamplingParams
+from llm.model import GPTMini
 
 
 def make_model():

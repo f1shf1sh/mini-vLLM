@@ -2,10 +2,10 @@ from pathlib import Path
 
 import torch
 
-from lmcore.checkpoint import load_checkpoint, save_checkpoint
-from lmcore.config import ProjectConfig
-from lmcore.model import GPTMini
-from lmcore.tokenizer import CharTokenizer
+from llm.checkpoint import load_checkpoint, save_checkpoint
+from llm.config import ProjectConfig
+from llm.model import GPTMini
+from llm.tokenizer import CharTokenizer
 
 
 def make_project_config() -> ProjectConfig:

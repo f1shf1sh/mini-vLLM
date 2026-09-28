@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from lmcore.config import load_config
+from llm.config import load_config
 
 
 def test_load_base_config() -> None:

@@ -17,7 +17,7 @@ from ..utils import timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate text with lmcore.")
+    parser = argparse.ArgumentParser(description="Generate text with llm.")
     parser.add_argument("--ckpt", required=True, help="Checkpoint path.")
     parser.add_argument("--prompt", required=True, help="Prompt text.")
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Generation length.")

@@ -1,5 +1,5 @@
-from lmcore.dataset import TextDataset
-from lmcore.tokenizer import CharTokenizer
+from llm.dataset import TextDataset
+from llm.tokenizer import CharTokenizer
 
 def test_char_tokenizer_round_trip() -> None:
     tokenizer = CharTokenizer("hello world")

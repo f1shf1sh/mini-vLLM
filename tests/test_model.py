@@ -1,8 +1,8 @@
 import pytest
 import torch
 
-from lmcore.config import ModelConfig
-from lmcore.model import GPTMini
+from llm.config import ModelConfig
+from llm.model import GPTMini
 
 
 def make_model_config() -> ModelConfig:
