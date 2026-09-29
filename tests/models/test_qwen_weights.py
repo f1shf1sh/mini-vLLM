@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 from llm.inference.request import Request
 from llm.inference.sampler import SamplingParams
 from llm.inference.scheduler import Scheduler
-from llm.models.qwen.runner import QwenModelRunner
+from llm.model.qwen2_5_0_5b_instruct.runner import QwenModelRunner
 
 
 @pytest.mark.skipif(not os.environ.get("QWEN_MODEL_PATH"), reason="QWEN_MODEL_PATH not provided; no weights are downloaded")

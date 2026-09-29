@@ -9,7 +9,7 @@ from llm.inference.runner import RunnerSpec
 from llm.inference.types import RunnerOutput
 
 
-class ModelRunner:
+class GPTMiniRunner:
     """Adapt GPTMini forward and cache construction to the public engine."""
 
     def __init__(
@@ -32,7 +32,7 @@ class ModelRunner:
         *,
         num_blocks: int,
         block_size: int,
-    ) -> ModelRunner:
+    ) -> GPTMiniRunner:
         if num_blocks < 1 or block_size < 1:
             raise ValueError("num_blocks and block_size must be positive.")
         config = model.config

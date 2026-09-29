@@ -11,7 +11,7 @@ from transformers import AutoTokenizer
 from llm.config import InferenceConfig, load_config
 from llm.inference.request import Request
 from llm.inference.scheduler import Scheduler
-from llm.models.qwen.runner import QwenModelRunner
+from llm.model.qwen2_5_0_5b_instruct.runner import QwenModelRunner
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -22,3 +22,10 @@ def test_scheduler_depends_only_on_runner_resource_contract():
     path = Path(__file__).resolve().parents[2] / 'src/llm/inference/scheduler.py'
     for module in imports(path):
         assert not any(part in module.split('.') for part in ('cache', 'models', 'model', 'toy'))
+
+
+def test_shipped_model_adapters_do_not_import_repository_toy_modules():
+    root = Path(__file__).resolve().parents[2] / 'src/llm'
+    for path in root.rglob('*.py'):
+        for module in imports(path):
+            assert 'toy' not in module.split('.')

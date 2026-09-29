@@ -1,4 +1,4 @@
-"""Tokenizer utilities for the character-level language model."""
+"""Learning implementation of character tokenization, kept for existing toy checkpoints."""
 
 from __future__ import annotations
 

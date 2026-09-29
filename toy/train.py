@@ -12,7 +12,7 @@ from .checkpoint import save_checkpoint
 from .config import ProjectConfig, load_config
 from .dataset import TextDataset
 from .model import GPTMini
-from .learning.char_tokenizer import CharTokenizer
+from .tokenizer import CharTokenizer
 from .utils import set_seed, timer, tokens_per_second
 
 

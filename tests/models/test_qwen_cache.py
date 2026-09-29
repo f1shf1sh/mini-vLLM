@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from llm.models.qwen.cache import make_qwen_kv_pool
+from llm.model.qwen2_5_0_5b_instruct.cache import make_qwen_kv_pool
 from llm.cache.pool import KVPool
 
 

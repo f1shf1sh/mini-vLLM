@@ -12,12 +12,12 @@ from .config import ProjectConfig
 from .generator import generate_tokens
 from llm.inference.sampler import SamplingParams
 from .model import GPTMini
-from .learning.char_tokenizer import CharTokenizer
+from .tokenizer import CharTokenizer
 from .utils import timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate text with llm.")
+    parser = argparse.ArgumentParser(description="Generate directly with a toy GPTMini checkpoint.")
     parser.add_argument("--ckpt", required=True, help="Checkpoint path.")
     parser.add_argument("--prompt", required=True, help="Prompt text.")
     parser.add_argument("--max-new-tokens", type=int, default=128, help="Generation length.")

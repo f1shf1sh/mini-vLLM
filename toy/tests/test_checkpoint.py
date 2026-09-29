@@ -5,7 +5,7 @@ import torch
 from toy.checkpoint import load_checkpoint, save_checkpoint
 from toy.config import ProjectConfig
 from toy.model import GPTMini
-from toy.learning.char_tokenizer import CharTokenizer
+from toy.tokenizer import CharTokenizer
 
 
 def make_project_config() -> ProjectConfig:

@@ -3,7 +3,7 @@ import torch
 from toy.config import ModelConfig
 from llm.cache.blocks import BlockManager, BlockAllocator
 from llm.cache.pool import KVPool
-from toy.runner import ModelRunner
+from llm.model.gpt_mini.runner import GPTMiniRunner
 from toy.model import GPTMini
 
 
@@ -27,7 +27,7 @@ def _make_runner():
     )
     allocator = BlockAllocator(num_blocks=20)
     bm = BlockManager(allocator=allocator, block_size=4)
-    return ModelRunner(model, pool, bm), model.config
+    return GPTMiniRunner(model, pool, bm), model.config
 
 
 def test_prefill_produces_correct_logits_shape():
@@ -93,3 +93,30 @@ def test_paged_logits_match_full_forward_across_noncontiguous_blocks():
     table = runner.block_manager.block_tables["test"]
     assert table.num_tokens == input_ids.size(1)
     assert table.physical_blocks == [0, 2]
+
+
+@torch.no_grad()
+def test_gpt_mini_runner_matches_direct_generation_and_releases_cache():
+    from llm.inference.request import Request
+    from llm.inference.sampler import SamplingParams
+    from llm.inference.scheduler import Scheduler
+    from toy.generator import generate_tokens
+
+    for device in ("cpu", "cuda") if torch.cuda.is_available() else ("cpu",):
+        model = make_model().to(device)
+        runner = GPTMiniRunner.from_model(model, num_blocks=8, block_size=2)
+        requests = [Request("a", [1, 2, 3], 4, SamplingParams(do_sample=False)),
+                    Request("b", [4], 3, SamplingParams(do_sample=False))]
+        expected = [generate_tokens(model, torch.tensor([r.input_ids], device=device),
+                                    r.max_new_tokens, SamplingParams(do_sample=False))[0].tolist()
+                    for r in requests]
+        scheduler = Scheduler(runner)
+        for request in requests:
+            scheduler.add_request(request)
+        scheduler.step()
+        scheduler.step()
+        assert len(scheduler.running) == 2
+        scheduler.run()
+        assert [r.output_ids for r in requests] == expected
+        assert runner.cache.block_manager.allocator.num_free == 8
+        assert not runner.cache.block_manager.block_tables

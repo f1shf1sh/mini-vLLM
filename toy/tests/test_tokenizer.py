@@ -1,5 +1,5 @@
 from toy.dataset import TextDataset
-from toy.learning.char_tokenizer import CharTokenizer
+from toy.tokenizer import CharTokenizer
 
 def test_char_tokenizer_round_trip() -> None:
     tokenizer = CharTokenizer("hello world")
