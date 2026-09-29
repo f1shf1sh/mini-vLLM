@@ -4,17 +4,22 @@
 
 `src/llm/` is the shipped inference package (`llm`). Shared storage lives in
 `cache/`; `inference/` contains the Runner contract, request scheduling, and
-sampling. `models/qwen/` adapts Qwen forward and Transformers Cache;
+sampling. `model/qwen2_5_0_5b_instruct/` adapts Qwen forward and Transformers Cache;
 `runtime/generate.py` provides the real-model `llm-generate` CLI. Only inference
 configuration belongs in `src/llm/config.py` and root `configs/`.
 
 `toy/` is a repository-only GPT model and training module, with its own config,
-checkpoint, dataset, runner, generator, and train/generate entry points. Its
-legacy character tokenizer lives in `toy/learning/char_tokenizer.py`. Model,
+checkpoint, dataset, direct generator, and train/generate entry points. Its
+learning-oriented character tokenizer lives in `toy/tokenizer.py`. Concrete
+Runners live in `src/llm/model/gpt_mini/` and
+`src/llm/model/qwen2_5_0_5b_instruct/`; retain the public Runner abstraction. Model,
 training, and checkpoint tests live in `toy/tests/`; public cache, inference,
 and Qwen tests live in `tests/cache`, `tests/inference`, and `tests/models`.
-Root `examples/` is for Qwen; toy examples/tools/benchmarks live under `toy/`.
-Root `benchmarks/` keeps model-independent cache analysis and real-model checks.
+Root `examples/` is for engine usage. Do not recreate toy examples/benchmarks.
+Root `benchmarks/` is for shared cache analysis and future engine benchmarking;
+toy dataset tools remain under `toy/tools/`. Model adapter directories use full
+model names normalized to valid Python identifiers. New models implement Runner
+inside their adapter directory; do not add model-specific Scheduler branches.
 Do not create unused placeholder modules for future training or export work.
 
 ## Build, Test, and Development Commands
@@ -84,7 +89,9 @@ Personal learning code/tests/handouts stay in `.local/learning/labNN_topic/`,
 and detailed project records in `.local/docs/`. These directories and root
 CLAUDE.md are ignored. Root AGENTS.md is versionable. README covers the project
 layout, runnable commands, inference boundaries, and future training/export plans.
-The shipped llm package must not import toy or personal lessons. Toy intentionally
-uses its preserved `toy.learning` character tokenizer. Restrict default pytest
+The shipped llm package must not import toy or personal lessons. GPTMiniRunner
+accepts an externally constructed model. Direct toy generation calls model
+forward without constructing Runner/Scheduler/cache resources. Toy uses its
+preserved educational `toy.tokenizer` implementation. Restrict default pytest
 discovery to `tests/` and `toy/tests/`; run personal learning tests explicitly.
 See `.local/README.md` for the local-materials layout.

@@ -9,80 +9,94 @@ The implementation gathers paged K/V into contiguous tensors for attention.
 It does **not** implement a high-performance paged-attention kernel. Scheduling
 interleaves one request per step; tensor-level continuous batching is future work.
 
-## Layout and migration
+## Layout and model adapters
 
 ```text
 src/llm/
-  cache/             blocks.py, pool.py, paged.py
-  inference/         runner.py, scheduler.py, request.py, sampler.py, types.py
-  models/qwen/       runner.py, cache.py
+  cache/                        blocks.py, pool.py, paged.py
+  inference/                    runner.py, scheduler.py, request.py, sampler.py, types.py
+  model/
+    gpt_mini/                   runner.py
+    qwen2_5_0_5b_instruct/       runner.py, cache.py
   runtime/generate.py
-  config.py          real-model inference configuration
+  config.py                     real-model inference configuration
 
 toy/
-  model/             GPTMini, attention, block
-  runner.py          adapter to the shared inference engine
-  generator.py       character-model generation helper
+  model/                        GPTMini, attention, block
+  tokenizer.py                  handwritten character tokenizer for learning
+  generator.py                  direct model generation, without Scheduler
   config.py, checkpoint.py, dataset.py, utils.py
   train.py, generate.py
-  learning/char_tokenizer.py
-  configs/, tests/, examples/, benchmarks/, tools/
+  configs/, tests/, tools/
 
-tests/               cache/, inference/, models/
-configs/             qwen.yaml
-examples/            qwen_inference.py
-benchmarks/          kv_memory.py (model-independent cache arithmetic)
-docker/              Dockerfile, dev.sh
+tests/                          cache/, inference/, models/
+configs/                        qwen.yaml
+examples/                       qwen_inference.py
+benchmarks/                     kv_memory.py (shared cache arithmetic)
+docker/                         Dockerfile, dev.sh
 ```
+
+Each model adapter directory uses the full model name, normalized to a Python
+identifier: **GPTMini** becomes `gpt_mini`, and **Qwen2.5-0.5B-Instruct** becomes
+`qwen2_5_0_5b_instruct`. Model-specific code belongs there; future models add their
+own adapter directory. There is no registration system or model factory.
 
 | Previous location | Current location |
 | --- | --- |
 | `llm.inference.block_manager` | `llm.cache.blocks` |
 | `llm.inference.kv_pool` | `llm.cache.pool` and `llm.cache.paged` |
-| `llm.inference.hf_cache`, `hf_model_runner` | `llm.models.qwen.cache`, `runner` |
-| `llm.model`, training config/dataset/checkpoint | corresponding modules under `toy` |
-| `llm.inference.model_runner`, `generator` | `toy.runner`, `toy.generator` |
-| `llm.tokenizer.CharTokenizer` | `toy.learning.char_tokenizer.CharTokenizer` |
-| `llm.runtime.train`, old toy generate | `toy.train`, `toy.generate` |
-| training YAML, toy examples/tools/block benchmark | corresponding directories under `toy` |
+| `llm.models.qwen` | `llm.model.qwen2_5_0_5b_instruct` |
+| `toy.runner.ModelRunner` | `llm.model.gpt_mini.runner.GPTMiniRunner` |
+| `toy.learning.char_tokenizer.CharTokenizer` | `toy.tokenizer.CharTokenizer` |
+| toy runner integration tests | `tests/models/test_gpt_mini_runner.py` |
+| `toy/examples/`, `toy/benchmarks/` | removed; future engine benchmarks belong in root `benchmarks/` |
 
-The import package remains `llm`. Wheels and source distributions include the
-inference package; `toy` runs from the checkout and is not an installed package.
-Data and generated artifacts stay in ignored `data/` and `outputs/`; migration
-does not move or overwrite existing checkpoints or datasets. Personal lessons
-and detailed validation records remain in ignored `.local/`.
+The import package remains `llm`. Wheels and source distributions include only
+the inference package and metadata. `toy` runs from the checkout. The GPTMini
+adapter accepts a model object supplied by the caller and does not import toy
+training code. Data and generated artifacts remain in ignored `data/` and
+`outputs/`; existing checkpoints and datasets are preserved. Personal lessons
+and detailed validation records stay in ignored `.local/`.
 
-## Inference boundaries
+## Runner and direct model execution
 
-`Scheduler(runner)` handles FIFO admission, round-robin decode, sampling,
-termination, and resource cleanup. It reserves enough capacity for admitted
-requests to finish. `RunnerSpec` exposes context length, device, and dtype;
-`prefill` and `decode` return public `RunnerOutput` logits shaped `[1, T, V]`.
-Adapters parse model-specific cache dimensions and construct resource objects.
-The scheduler sees capacity, allocation, growth, and release operations, not a
-fixed KV tensor layout.
+The public **Runner abstraction is retained** in `llm.inference.runner`.
+`Scheduler(runner)` receives an implementation from the appropriate model adapter
+and handles FIFO admission, round-robin decode, sampling, termination, and resource
+cleanup. Adding a model requires implementing the Runner contract in its model
+adapter and passing that instance to Scheduler; the public scheduler does not
+need model-specific branches.
 
-- `BlockManager` executes block allocation, block-table updates, and reclamation.
-- `KVPool` owns physical tensors; `PagedKVCache` maps logical positions and
-  performs reads, writes, and gather.
-- `PagedCacheResources` exposes this storage's lifecycle to the scheduler.
-- `toy.runner.ModelRunner` adapts GPTMini; `QwenModelRunner` adapts Transformers
-  forward. Qwen uses **KV heads**, separately from query heads.
-- `QwenPagedCache` is a per-forward Transformers view. It writes already reserved
-  slots and does not allocate/free requests or run its own generation loop.
+`RunnerSpec` exposes context length, device, and dtype. `prefill` and `decode`
+return `RunnerOutput` logits shaped `[1, T, V]`. Adapters parse model-specific KV
+specifications and construct cache resources. Scheduler uses capacity,
+allocation, growth, and release operations without inspecting KV tensor layout.
 
-The final sampled token is returned without another forward, so the maximum
-cached length is `prompt_length + max_new_tokens - 1`. Requests release storage
-on length/EOS completion, cancellation, and failure. `run()` cleans pending work
-on failure; callers stepping manually can call `close()` to cancel remaining work.
-Public cache code does not depend on scheduling or models. The shipped `llm`
-package does not import toy training code.
+- `BlockManager` executes block ownership and block-table updates.
+- `KVPool` owns tensors; `PagedKVCache` maps positions and performs read/write/gather.
+- `PagedCacheResources` exposes this storage's lifecycle to Scheduler.
+- `GPTMiniRunner` adapts a supplied GPTMini model to mini-vLLM.
+- `QwenModelRunner` adapts Transformers forward and uses KV heads separately
+  from query heads. `QwenPagedCache` only writes already reserved slots; it does
+  not own request allocation/release or an independent generation loop.
 
-For future MoE models with standard KV, expert routing and expert execution stay
-in the model adapter/model layer; request scheduling remains unchanged. MLA and
-other special cache representations are a separate extension point: their storage
-and forward view need an appropriate adapter behind the resource boundary.
-No MoE operators, expert parallelism, or plugin registry are implemented now.
+The final sampled token is returned without another forward, so maximum cached
+length is `prompt_length + max_new_tokens - 1`. Storage is released on completion,
+EOS, cancellation, or failure. `run()` cleans pending work on failure; callers
+stepping manually can call `close()` to cancel remaining work.
+
+For direct execution, `python -m toy.generate` calls GPTMini on the full prefix
+for each new token. It does not construct a Runner, Scheduler, or paged cache.
+It only reuses the stateless public sampler. The direct path is for running and
+learning the toy model; engine integration correctness is tested in `tests/models`.
+Future benchmarks target mini-vLLM in root `benchmarks/`, rather than maintaining
+a separate toy benchmark/example hierarchy.
+
+For future standard-KV MoE, expert routing and execution stay in the model layer.
+MLA and other special cache representations are a separate extension point whose
+storage and forward view require a suitable adapter behind the resource boundary.
+No MoE operators, expert parallelism, or plugin registry are implemented here.
+Paged storage with gather is not a high-performance paged-attention kernel.
 
 ## Run in the existing GPU container
 
@@ -126,8 +140,6 @@ Run from the repository root, inside the container or through `docker/dev.sh`:
 python -m toy.train --config toy/configs/base.yaml
 python -m toy.generate --ckpt outputs/ckpt.pt --prompt 'First Citizen:' \
   --device cuda --max-new-tokens 32
-python -m toy.examples.paged_inference --device cuda
-python -m toy.benchmarks.block_usage
 ```
 
 For the existing TinyShakespeare workflow, use `toy/configs/cuda.yaml`. If its
@@ -142,11 +154,13 @@ successful short training run only proves the workflow, not conversational quali
 
 ## Future toy tokenizer, conversation training, and export
 
-The preserved handwritten tokenizer lives in `toy/learning/char_tokenizer.py`.
-Future implementation locations are `toy/tokenizer.py` for Hugging Face
-`tokenizers`, `toy/chat.py` for conversation formatting, and `toy/export.py` for
-inference exports. These files are planned, not empty placeholder implementations.
-This round does not download new dialogue datasets or train a new chat model.
+`toy/tokenizer.py` is the existing handwritten character tokenizer for learning
+tokenization. It also keeps old character checkpoints usable; a separate learning
+directory is unnecessary. Future Hugging Face `tokenizers` integration should
+preserve this educational implementation and be added when actual dialogue
+training is implemented. `toy/chat.py` and `toy/export.py` remain planned locations
+for conversation formatting and inference exports, without placeholder files.
+This round does not download dialogue datasets or train a new chat model.
 
 Dialogue datasets will be normalized to `messages`. Training and inference must
 share the chat template, role/turn boundaries, generation-start marker, and
