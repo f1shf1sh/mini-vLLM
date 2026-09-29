@@ -21,13 +21,19 @@ RUN python -m venv --without-pip --system-site-packages /opt/venv \
     && python -m pip --python /opt/venv install --no-cache-dir \
         -e . \
         "torch==2.11.0" \
+        "transformers==4.51.3" \
+        "tokenizers==0.21.4" \
+        "safetensors==0.5.3" \
+        "huggingface-hub==0.30.2" \
+        "regex==2026.9.10" \
         "PyYAML==6.0.3" \
         "tqdm==4.70.1" \
         "pytest==9.0.3" \
         "pluggy==1.6.0" \
         "iniconfig==2.3.0" \
+    && /opt/venv/bin/python -m pip check \
     && /opt/venv/bin/python -c \
-        "import torch; assert torch.__version__ == '2.11.0+cu128', torch.__version__"
+        "import torch; from transformers import AutoTokenizer, Qwen2ForCausalLM; assert torch.__version__ == '2.11.0+cu128', torch.__version__"
 
 # Match host ownership and provide the account/HOME required by editor attach.
 RUN if ! getent group "$DEV_GID" >/dev/null; then \
@@ -41,7 +47,9 @@ RUN if ! getent group "$DEV_GID" >/dev/null; then \
             --home-dir /home/dev --shell /bin/bash dev; \
     fi \
     && mkdir -p /home/dev outputs \
-    && chown -R "$DEV_UID:$DEV_GID" /home/dev /opt/venv /workspace/mini-vLLM
+        "$XDG_CACHE_HOME" "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR" \
+    && chown -R "$DEV_UID:$DEV_GID" /home/dev /opt/venv /workspace/mini-vLLM \
+        "$XDG_CACHE_HOME" "$TORCHINDUCTOR_CACHE_DIR" "$TRITON_CACHE_DIR"
 
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:${PATH}" \
@@ -51,8 +59,7 @@ COPY configs/ ./configs/
 COPY tests/ ./tests/
 COPY benchmarks/ ./benchmarks/
 COPY examples/ ./examples/
-COPY tools/ ./tools/
-COPY data/input.txt ./data/input.txt
+COPY toy/ ./toy/
 
 USER ${DEV_UID}:${DEV_GID}
 CMD ["sleep", "infinity"]

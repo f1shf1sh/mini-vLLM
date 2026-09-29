@@ -1,0 +1,10 @@
+model: /models/Qwen2.5-0.5B-Instruct
+device: cuda
+dtype: float32
+num_blocks: 256
+block_size: 16
+max_new_tokens: 128
+do_sample: false
+temperature: 1.0
+top_k: null
+top_p: null

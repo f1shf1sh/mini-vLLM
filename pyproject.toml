@@ -12,7 +12,11 @@ dependencies = [
     "pyyaml>=6.0.3",
     "torch>=2.11.0",
     "tqdm>=4.67.3",
+    "transformers>=4.51.3,<4.52",
 ]
+
+[project.scripts]
+llm-generate = "llm.runtime.generate:main"
 
 [dependency-groups]
 dev = [
@@ -25,3 +29,6 @@ testpaths = ["tests", "toy/tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llm"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/src/llm", "/pyproject.toml", "/README.md"]
