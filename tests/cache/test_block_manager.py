@@ -1,6 +1,6 @@
 import pytest
 
-from llm.inference.block_manager import BlockTable, BlockAllocator
+from llm.cache.blocks import BlockTable, BlockAllocator
 
 def test_block_table_empty():
     table = BlockTable(block_size=4)
@@ -65,7 +65,7 @@ def test_free_unallocated():
 
 # ── BlockManager tests ──────────────────────────────────────────────
 
-from llm.inference.block_manager import BlockManager
+from llm.cache.blocks import BlockManager
 
 
 def _make_bm(num_blocks: int = 10, block_size: int = 4) -> BlockManager:

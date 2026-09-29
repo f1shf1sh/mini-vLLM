@@ -7,8 +7,8 @@ import torch
 from .request import Request, RequestStatus
 from .sampler import Sampler
 from .model_runner import ModelRunner
-from .block_manager import BlockManager
-from .kv_pool import KVPool
+from ..cache.blocks import BlockManager
+from ..cache.pool import KVPool
 
 
 class Scheduler:

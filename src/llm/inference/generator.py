@@ -4,8 +4,8 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from .block_manager import BlockAllocator, BlockManager
-from .kv_pool import KVPool
+from ..cache.blocks import BlockAllocator, BlockManager
+from ..cache.pool import KVPool
 from .request import Request
 from .sampler import Sampler, SamplingParams
 from .scheduler import Scheduler

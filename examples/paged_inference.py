@@ -16,8 +16,8 @@ import torch
 
 from llm.checkpoint import load_checkpoint
 from llm.config import ProjectConfig
-from llm.inference.block_manager import BlockAllocator, BlockManager
-from llm.inference.kv_pool import KVPool
+from llm.cache.blocks import BlockAllocator, BlockManager
+from llm.cache.pool import KVPool
 from llm.inference.model_runner import ModelRunner
 from llm.inference.request import Request, RequestStatus
 from llm.inference.sampler import SamplingParams

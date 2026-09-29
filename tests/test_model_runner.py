@@ -1,8 +1,8 @@
 import torch
 
 from llm.config import ModelConfig
-from llm.inference.block_manager import BlockManager, BlockAllocator
-from llm.inference.kv_pool import KVPool
+from llm.cache.blocks import BlockManager, BlockAllocator
+from llm.cache.pool import KVPool
 from llm.inference.model_runner import ModelRunner
 from llm.model import GPTMini
 

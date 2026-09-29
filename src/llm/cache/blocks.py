@@ -97,10 +97,18 @@ class BlockManager:
         '''
         If num_tokens = 0, not execute next loop
         ''' 
-        num_blocks = table.num_logical_blocks_for(num_tokens) 
-        for _ in range(num_blocks):
-            table.append_block(self.allocator.allocate())
-        
+        num_blocks = table.num_logical_blocks_for(num_tokens)
+
+        try:
+            for _ in range(num_blocks):
+                table.append_block(self.allocator.allocate())
+
+        except Exception:
+            for block_id in table.physical_blocks:
+                self.allocator.free(block_id)
+
+            raise
+
         table.num_tokens = num_tokens
         self.block_tables[request_id] = table 
         

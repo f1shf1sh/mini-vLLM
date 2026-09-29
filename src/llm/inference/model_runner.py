@@ -3,8 +3,9 @@ from __future__ import annotations
 import torch
 
 from .types import RunnerOutput
-from .kv_pool import KVPool, PagedKVCache
-from .block_manager import BlockManager
+from ..cache.pool import KVPool
+from ..cache.paged import PagedKVCache
+from ..cache.blocks import BlockManager
 
 
 class ModelRunner:
