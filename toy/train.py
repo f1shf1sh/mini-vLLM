@@ -8,19 +8,19 @@ from pathlib import Path
 
 import torch
 
-from ..checkpoint import save_checkpoint
-from ..config import ProjectConfig, load_config
-from ..dataset import TextDataset
-from ..model import GPTMini
-from ..tokenizer import CharTokenizer
-from ..utils import set_seed, timer, tokens_per_second
+from .checkpoint import save_checkpoint
+from .config import ProjectConfig, load_config
+from .dataset import TextDataset
+from .model import GPTMini
+from .learning.char_tokenizer import CharTokenizer
+from .utils import set_seed, timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Training scaffold for llm.")
     parser.add_argument(
         "--config",
-        default="configs/base.yaml",
+        default="toy/configs/base.yaml",
         help="Path to the YAML config file.",
     )
     return parser

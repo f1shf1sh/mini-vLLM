@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from llm.model.attention import Head, MultiHeadAttention
+from toy.model.attention import Head, MultiHeadAttention
 
 
 def test_head_output_shape() -> None:

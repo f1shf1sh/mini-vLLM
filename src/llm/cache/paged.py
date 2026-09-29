@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from .blocks import BlockTable
+from .blocks import BlockManager, BlockTable
 from .pool import KVPool
 
 
@@ -91,3 +91,44 @@ class PagedKVCache:
         for i in range(S):
             self.write(layer, start_pos + i,
                        key=k[0, :, i, :], value=v[0, :, i, :])
+
+
+class PagedCacheResources:
+    """Request resources backed by standard KV pages.
+
+    Model adapters build the pool and block manager. This object exposes their
+    capacity and lifecycle without making the scheduler inspect KV dimensions.
+    """
+
+    def __init__(self, pool: KVPool, block_manager: BlockManager) -> None:
+        if pool.block_size <= 0 or pool.num_blocks <= 0:
+            raise ValueError("Cache block_size and num_blocks must be positive.")
+        allocator = block_manager.allocator
+        if (pool.block_size != block_manager.block_size
+                or pool.num_blocks != allocator.num_free + len(allocator.allocated)):
+            raise ValueError("KV pool and block manager capacities must match.")
+        self.pool = pool
+        self.block_manager = block_manager
+
+    @property
+    def capacity(self) -> int:
+        return self.pool.num_blocks
+
+    def required_capacity(self, num_tokens: int) -> int:
+        return (num_tokens + self.pool.block_size - 1) // self.pool.block_size
+
+    def allocate(self, request_id: str, num_tokens: int) -> None:
+        self.block_manager.allocate_for_request(request_id, num_tokens)
+
+    def append(self, request_id: str) -> None:
+        self.block_manager.append_token(request_id)
+
+    def release(self, request_id: str) -> None:
+        if request_id in self.block_manager.block_tables:
+            self.block_manager.free_request(request_id)
+
+    def view(self, request_id: str) -> PagedKVCache:
+        return PagedKVCache(
+            self.pool, self.block_manager.block_tables[request_id],
+            self.pool.num_heads, self.pool.head_dim,
+        )

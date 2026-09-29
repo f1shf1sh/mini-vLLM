@@ -87,6 +87,8 @@ class BlockManager:
         self.block_tables: dict[str, BlockTable] = {}
 
     def allocate_for_request(self, request_id: str, num_tokens: int) -> None:
+        if num_tokens < 0:
+            raise ValueError("num_tokens must be nonnegative.")
         if request_id in self.block_tables:
             raise ValueError(
                 f"request_id: {request_id} already exists in block_tables"

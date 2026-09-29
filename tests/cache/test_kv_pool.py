@@ -116,3 +116,32 @@ def test_gather_preserves_pool_device_dtype_and_values(device):
         assert k.dtype == v.dtype == torch.float64
         assert torch.equal(k, expected_k[:, :, :count])
         assert torch.equal(v, expected_v[:, :, :count])
+
+
+def test_paged_resources_share_one_block_lifecycle():
+    from llm.cache.paged import PagedCacheResources
+    pool = KVPool(2, 1, 2, 2, 3)
+    manager = BlockManager(BlockAllocator(2), 2)
+    cache = PagedCacheResources(pool, manager)
+    cache.allocate("request", 2)
+    view = cache.view("request")
+    assert cache.required_capacity(3) == 2
+    cache.append("request")
+    assert view.num_tokens == 3
+    key = torch.randn(2, 3)
+    value = torch.randn(2, 3)
+    view.write(0, 2, key, value)
+    actual_key, actual_value = view.read(0, 2)
+    torch.testing.assert_close(actual_key, key)
+    torch.testing.assert_close(actual_value, value)
+    cache.release("request")
+    cache.release("request")
+    assert manager.allocator.num_free == cache.capacity == 2
+    assert not manager.block_tables
+
+
+def test_paged_resources_reject_mismatched_storage_and_allocator():
+    import pytest
+    from llm.cache.paged import PagedCacheResources
+    with pytest.raises(ValueError, match="capacities"):
+        PagedCacheResources(KVPool(2, 1, 1, 2, 3), BlockManager(BlockAllocator(1), 2))

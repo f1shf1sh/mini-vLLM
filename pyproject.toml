@@ -14,18 +14,14 @@ dependencies = [
     "tqdm>=4.67.3",
 ]
 
-[project.scripts]
-llm-train = "llm.runtime.train:main"
-llm-generate = "llm.runtime.generate:main"
-
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
-testpaths = ["tests"]
+pythonpath = ["src", "."]
+testpaths = ["tests", "toy/tests"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/llm"]

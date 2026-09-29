@@ -7,13 +7,13 @@ from collections.abc import Sequence
 
 import torch
 
-from ..checkpoint import load_checkpoint
-from ..config import ProjectConfig
-from ..inference.generator import generate_tokens
-from ..inference.sampler import SamplingParams
-from ..model import GPTMini
-from ..tokenizer import CharTokenizer
-from ..utils import timer, tokens_per_second
+from .checkpoint import load_checkpoint
+from .config import ProjectConfig
+from .generator import generate_tokens
+from llm.inference.sampler import SamplingParams
+from .model import GPTMini
+from .learning.char_tokenizer import CharTokenizer
+from .utils import timer, tokens_per_second
 
 
 def build_parser() -> argparse.ArgumentParser:

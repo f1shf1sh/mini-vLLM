@@ -142,3 +142,16 @@ def test_repeated_mixed_length_rounds_restore_all_blocks():
             assert_ownership(manager, 4)
         assert snapshot(manager) == initial
         assert manager.allocator.num_free == 4
+
+
+@pytest.mark.parametrize("num_tokens", [-1, -4])
+def test_negative_allocation_preserves_live_request(num_tokens):
+    manager = BlockManager(BlockAllocator(4), block_size=4)
+    manager.allocate_for_request("live", 4)
+    blocks = list(manager.block_tables["live"].physical_blocks)
+    free = manager.allocator.num_free
+    with pytest.raises(ValueError, match="nonnegative"):
+        manager.allocate_for_request("invalid", num_tokens)
+    assert manager.allocator.num_free == free
+    assert set(manager.block_tables) == {"live"}
+    assert manager.block_tables["live"].physical_blocks == blocks

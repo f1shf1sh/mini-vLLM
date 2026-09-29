@@ -2,13 +2,12 @@
 import random
 import torch
 
-from llm.config import ModelConfig
-from llm.cache.blocks import BlockManager, BlockAllocator
-from llm.cache.pool import KVPool
+from toy.config import ModelConfig
+from toy.runner import ModelRunner
 from llm.inference.request import Request
 from llm.inference.scheduler import Scheduler
 from llm.inference.sampler import SamplingParams
-from llm.model import GPTMini
+from toy.model import GPTMini
 
 
 def make_model():
@@ -22,14 +21,8 @@ def make_model():
 
 
 def make_scheduler(model, num_blocks):
-    pool = KVPool(
-        num_blocks=num_blocks, num_layers=model.config.n_layer,
-        num_heads=model.config.n_head, block_size=16,
-        head_dim=model.config.n_embd // model.config.n_head,
-    )
-    allocator = BlockAllocator(num_blocks=num_blocks)
-    bm = BlockManager(allocator=allocator, block_size=16)
-    return Scheduler(model, kv_pool=pool, block_manager=bm)
+    runner = ModelRunner.from_model(model, num_blocks=num_blocks, block_size=16)
+    return Scheduler(runner)
 
 
 def main():
@@ -57,7 +50,7 @@ def main():
 
     while not sched.is_done:
         sched.step()
-        used = num_blocks - sched.block_manager.allocator.num_free
+        used = num_blocks - sched.cache.block_manager.allocator.num_free
         peak_allocated = max(peak_allocated, used)
         timesteps.append(used)
 
@@ -112,7 +105,7 @@ def _sweep():
         peak = 0
         while not sched.is_done:
             sched.step()
-            used = num_blocks - sched.block_manager.allocator.num_free
+            used = num_blocks - sched.cache.block_manager.allocator.num_free
             peak = max(peak, used)
 
         contig = n_req * 256 // 16

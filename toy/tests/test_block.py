@@ -1,6 +1,6 @@
 import torch
 
-from llm.model.block import Block, FeedForward
+from toy.model.block import Block, FeedForward
 
 
 def test_feedforward_output_shape() -> None:

@@ -1,7 +1,7 @@
 """Run a trained checkpoint through paged prefill, decode, and scheduling.
 
 Example:
-    python examples/paged_inference.py --device cuda --json-output outputs/inference-demo.json
+    python -m toy.examples.paged_inference --device cuda --json-output outputs/inference-demo.json
 """
 
 from __future__ import annotations
@@ -14,16 +14,16 @@ from typing import Any
 
 import torch
 
-from llm.checkpoint import load_checkpoint
-from llm.config import ProjectConfig
+from toy.checkpoint import load_checkpoint
+from toy.config import ProjectConfig
 from llm.cache.blocks import BlockAllocator, BlockManager
 from llm.cache.pool import KVPool
-from llm.inference.model_runner import ModelRunner
+from toy.runner import ModelRunner
 from llm.inference.request import Request, RequestStatus
 from llm.inference.sampler import SamplingParams
 from llm.inference.scheduler import Scheduler
-from llm.model import GPTMini
-from llm.tokenizer import CharTokenizer
+from toy.model import GPTMini
+from toy.learning.char_tokenizer import CharTokenizer
 
 
 class RecordingAllocator(BlockAllocator):
@@ -189,7 +189,7 @@ def run_wave(
     assert prefill_calls == len(requests)
     assert decode_calls == sum(request.max_new_tokens - 1 for request in requests)
     assert steps == expected_model_calls
-    assert_recovered(scheduler.block_manager, num_blocks)
+    assert_recovered(scheduler.cache.block_manager, num_blocks)
     for request in requests:
         assert request.status is RequestStatus.FINISHED
         assert request.num_generated_tokens == request.max_new_tokens
@@ -268,7 +268,7 @@ def main() -> int:
     allocator = RecordingAllocator(args.num_blocks)
     manager = BlockManager(allocator, args.kv_block_size)
     verification = verify_paged_logits(model, tokenizer, pool, manager)
-    scheduler = Scheduler(model, pool, manager)
+    scheduler = Scheduler(ModelRunner(model, pool, manager))
     waves = [
         run_wave(scheduler, tokenizer, allocator, wave, args.max_new_tokens,
                  args.temperature, device, args.num_blocks)

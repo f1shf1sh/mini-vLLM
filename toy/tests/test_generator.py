@@ -1,10 +1,10 @@
 import pytest
 import torch
 
-from llm.config import ModelConfig
-from llm.inference.generator import CachedGenerator, generate_tokens
+from toy.config import ModelConfig
+from toy.generator import CachedGenerator, generate_tokens
 from llm.inference.sampler import SamplingParams
-from llm.model import GPTMini
+from toy.model import GPTMini
 
 
 def make_model(device="cpu"):

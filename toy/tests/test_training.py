@@ -4,10 +4,10 @@ import pytest
 import torch
 import yaml
 
-from llm.checkpoint import load_checkpoint
-from llm.config import ProjectConfig
-from llm.model import GPTMini
-from llm.runtime.train import main
+from toy.checkpoint import load_checkpoint
+from toy.config import ProjectConfig
+from toy.model import GPTMini
+from toy.train import main
 
 
 def test_training_cli_saves_usable_checkpoint_after_one_step(

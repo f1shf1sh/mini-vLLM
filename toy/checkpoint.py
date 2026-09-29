@@ -9,7 +9,7 @@ import torch
 
 from .config import ProjectConfig
 from .model import GPTMini
-from .tokenizer import CharTokenizer
+from .learning.char_tokenizer import CharTokenizer
 
 
 def save_checkpoint(

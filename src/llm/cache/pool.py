@@ -66,4 +66,3 @@ class KVPool:
         k = self.pool[layer, PoolDim.KEY, block_id, :, offset, :]
         v = self.pool[layer, PoolDim.VALUE, block_id, :, offset, :]
         return k, v
-

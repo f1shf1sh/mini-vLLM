@@ -6,7 +6,7 @@ Pure calculation — no model needed, no GPU needed.
 import random
 
 
-# Your toy model config
+# Illustrative standard-KV dimensions; no model or runtime dependency
 NUM_LAYERS = 2
 NUM_HEADS = 2
 HEAD_DIM = 8

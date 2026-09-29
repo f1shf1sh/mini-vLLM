@@ -4,11 +4,10 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from ..cache.blocks import BlockAllocator, BlockManager
-from ..cache.pool import KVPool
-from .request import Request
-from .sampler import Sampler, SamplingParams
-from .scheduler import Scheduler
+from .runner import ModelRunner
+from llm.inference.request import Request
+from llm.inference.sampler import Sampler, SamplingParams
+from llm.inference.scheduler import Scheduler
 
 
 class BaseGenerator(ABC):
@@ -58,18 +57,10 @@ class CachedGenerator(BaseGenerator):
             )
         block_size = min(16, config.block_size)
         num_blocks = (cached_tokens + block_size - 1) // block_size
-        parameter = next(self.model.parameters())
-        pool = KVPool(
-            num_blocks=num_blocks,
-            num_layers=config.n_layer,
-            num_heads=config.n_head,
-            block_size=block_size,
-            head_dim=config.n_embd // config.n_head,
-            device=parameter.device,
-            dtype=parameter.dtype,
+        runner = ModelRunner.from_model(
+            self.model, num_blocks=num_blocks, block_size=block_size,
         )
-        block_manager = BlockManager(BlockAllocator(num_blocks), block_size)
-        scheduler = Scheduler(self.model, pool, block_manager, self.sampler)
+        scheduler = Scheduler(runner, self.sampler)
         request = Request(
             request_id="generate",
             input_ids=input_ids[0].tolist(),
@@ -77,8 +68,7 @@ class CachedGenerator(BaseGenerator):
             sampling_params=None,
         )
         scheduler.add_request(request)
-        while not scheduler.is_done:
-            scheduler.step()
+        scheduler.run()
         return input_ids.new_tensor([request.output_ids])
 
 

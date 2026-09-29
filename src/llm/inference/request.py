@@ -10,6 +10,8 @@ class RequestStatus(Enum):
     PREFILLING = auto()
     DECODING = auto()
     FINISHED = auto()
+    FAILED = auto()
+    CANCELLED = auto()
  
 @dataclass(slots=True)
 class Request:
@@ -20,6 +22,8 @@ class Request:
     generated_ids: list[int] = field(default_factory=list)
     status: RequestStatus = RequestStatus.WAITING
     
+    stop_token_ids: tuple[int, ...] = ()
+
     @property
     def prompt_length(self) -> int:
         return len(self.input_ids)
@@ -34,7 +38,11 @@ class Request:
     
     @property
     def is_finished(self) -> bool:
-        return self.num_generated_tokens >= self.max_new_tokens
+        return (
+            self.status in (RequestStatus.FINISHED, RequestStatus.FAILED, RequestStatus.CANCELLED)
+            or self.num_generated_tokens >= self.max_new_tokens
+            or bool(self.generated_ids and self.generated_ids[-1] in self.stop_token_ids)
+        )
     
     def mark_prefilling(self) -> None:
         self.status = RequestStatus.PREFILLING

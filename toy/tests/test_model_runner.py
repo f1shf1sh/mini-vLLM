@@ -1,10 +1,10 @@
 import torch
 
-from llm.config import ModelConfig
+from toy.config import ModelConfig
 from llm.cache.blocks import BlockManager, BlockAllocator
 from llm.cache.pool import KVPool
-from llm.inference.model_runner import ModelRunner
-from llm.model import GPTMini
+from toy.runner import ModelRunner
+from toy.model import GPTMini
 
 
 def make_model() -> GPTMini:

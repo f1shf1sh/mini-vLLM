@@ -1,37 +1,59 @@
 import torch
 import pytest
 
-from llm.config import ModelConfig
-from llm.cache.blocks import BlockManager, BlockAllocator
-from llm.cache.pool import KVPool
 from llm.inference.request import Request, RequestStatus
+from llm.inference.runner import RunnerSpec
 from llm.inference.sampler import Sampler, SamplingParams
 from llm.inference.scheduler import Scheduler
-from llm.model import GPTMini
+from llm.inference.types import RunnerOutput
 
 
-def make_model() -> GPTMini:
-    config = ModelConfig(
-        vocab_size=16, block_size=8, n_layer=2, n_head=2, n_embd=8,
-        dropout=0.0, bias=False,
-    )
-    model = GPTMini(config)
-    model.eval()
-    return model
+class FakeResources:
+    # No tensors, KV shape, model config, or BlockManager dependency.
+    def __init__(self, capacity=50):
+        self.capacity = capacity
+        self.allocations = {}
+
+    def required_capacity(self, num_tokens):
+        return (num_tokens + 3) // 4
+
+    @property
+    def num_free(self):
+        return self.capacity - sum(self.required_capacity(n) for n in self.allocations.values())
+
+    def allocate(self, request_id, num_tokens):
+        assert request_id not in self.allocations
+        assert self.required_capacity(num_tokens) <= self.num_free
+        self.allocations[request_id] = num_tokens
+
+    def append(self, request_id):
+        self.allocations[request_id] += 1
+        assert self.num_free >= 0
+
+    def release(self, request_id):
+        self.allocations.pop(request_id, None)
 
 
-def _make_scheduler(model=None, sampler=None):
-    if model is None:
-        model = make_model()
-    n_head = model.config.n_head
-    head_dim = model.config.n_embd // n_head
-    pool = KVPool(
-        num_blocks=50, num_layers=model.config.n_layer,
-        num_heads=n_head, block_size=4, head_dim=head_dim,
-    )
-    allocator = BlockAllocator(num_blocks=50)
-    bm = BlockManager(allocator=allocator, block_size=4)
-    return Scheduler(model, kv_pool=pool, block_manager=bm, sampler=sampler)
+class FakeRunner:
+    def __init__(self, capacity=50):
+        self.spec = RunnerSpec(8, torch.device("cpu"), torch.float32)
+        self.cache = FakeResources(capacity)
+        self.calls = []
+
+    def prefill(self, input_ids, request_id):
+        self.calls.append(("prefill", request_id))
+        assert self.cache.allocations[request_id] == input_ids.shape[1]
+        return RunnerOutput(torch.arange(16, dtype=torch.float32).view(1, 1, 16))
+
+    def decode(self, input_ids, request_id):
+        self.calls.append(("decode", request_id))
+        assert input_ids.shape == (1, 1)
+        assert request_id in self.cache.allocations
+        return RunnerOutput(torch.arange(16, dtype=torch.float32).view(1, 1, 16))
+
+
+def _make_scheduler(sampler=None):
+    return Scheduler(FakeRunner(), sampler=sampler)
 
 
 # ── is_done ────────────────────────────────────────────────────────
@@ -176,7 +198,7 @@ def test_block_manager_cleaned_after_finish():
     s.add_request(Request("r1", [1, 2, 3], max_new_tokens=1))
     while not s.is_done:
         s.step()
-    assert "r1" not in s.block_manager.block_tables
+    assert "r1" not in s.cache.allocations
 
 
 # ── FIFO / round-robin ─────────────────────────────────────────────
@@ -244,21 +266,19 @@ def test_per_request_sampling_params_used():
 
 
 def test_final_sample_at_block_boundary_does_not_allocate_unused_block():
-    model = make_model()
-    pool = KVPool(1, model.config.n_layer, model.config.n_head, 4, 4)
-    manager = BlockManager(BlockAllocator(1), 4)
-    scheduler = Scheduler(model, pool, manager)
+    runner = FakeRunner(capacity=1)
+    manager = runner.cache
+    scheduler = Scheduler(runner)
     scheduler.add_request(Request("boundary", [1, 2, 3, 4], 1))
     assert len(scheduler.step()) == 1
-    assert manager.allocator.num_free == 1
-    assert not manager.block_tables
+    assert manager.num_free == 1
+    assert not manager.allocations
 
 
 def test_waiting_request_is_deferred_until_decode_releases_capacity():
-    model = make_model()
-    pool = KVPool(2, model.config.n_layer, model.config.n_head, 4, 4)
-    manager = BlockManager(BlockAllocator(2), 4)
-    scheduler = Scheduler(model, pool, manager)
+    runner = FakeRunner(capacity=2)
+    manager = runner.cache
+    scheduler = Scheduler(runner)
     for request_id in ("first", "second"):
         scheduler.add_request(Request(request_id, [1, 2, 3], 4))
     scheduler.step()
@@ -270,7 +290,7 @@ def test_waiting_request_is_deferred_until_decode_releases_capacity():
     while not scheduler.is_done:
         scheduler.step()
     assert [r.request_id for r in scheduler.finished] == ["first", "second"]
-    assert manager.allocator.num_free == 2
+    assert manager.num_free == 2
 
 
 @pytest.mark.parametrize("input_ids,max_new_tokens,match", [
@@ -283,4 +303,89 @@ def test_invalid_request_is_rejected_before_allocation(input_ids, max_new_tokens
     with pytest.raises(ValueError, match=match):
         scheduler.add_request(Request("invalid", input_ids, max_new_tokens))
     assert scheduler.is_done
-    assert not scheduler.block_manager.block_tables
+    assert not scheduler.cache.allocations
+
+
+@pytest.mark.parametrize("stage", ["allocate", "prefill", "decode", "append", "sample"])
+def test_failure_releases_only_affected_request(monkeypatch, stage):
+    scheduler = _make_scheduler()
+    first = Request("first", [1, 2], 3)
+    failing = Request("fail", [3], 3, sampling_params=None)
+    scheduler.add_request(first)
+    scheduler.add_request(failing)
+    scheduler.step()
+    if stage == "decode":
+        scheduler.step()
+        scheduler.step()
+    target = scheduler.runner if stage in ("prefill", "decode") else scheduler.cache
+    if stage == "sample":
+        target = scheduler.default_sampler
+    original = getattr(target, stage)
+
+    def fail(*args, **kwargs):
+        if stage == "allocate":
+            original(*args, **kwargs)  # Even a partial allocation is released.
+        raise RuntimeError("injected failure")
+
+    monkeypatch.setattr(target, stage, fail)
+    with pytest.raises(RuntimeError, match="injected failure"):
+        scheduler.step()
+    assert failing.status is RequestStatus.FAILED
+    assert set(scheduler.cache.allocations) == {"first"}
+    assert "fail" not in scheduler._samplers
+    assert "fail" not in scheduler._next_inputs
+    monkeypatch.setattr(target, stage, original)
+    scheduler.run()
+    assert first.status is RequestStatus.FINISHED
+    assert not scheduler.cache.allocations
+
+
+def test_eos_finishes_early_and_releases_resources():
+    scheduler = _make_scheduler()
+    request = Request("eos", [1], 7, SamplingParams(do_sample=False), stop_token_ids=(15,))
+    scheduler.add_request(request)
+    assert scheduler.step() == [request]
+    assert request.generated_ids == [15]
+    assert request.status is RequestStatus.FINISHED
+    assert not scheduler.cache.allocations
+
+
+def test_close_cancels_waiting_and_running_and_is_idempotent():
+    scheduler = _make_scheduler()
+    requests = [Request(str(i), [1], 3) for i in range(2)]
+    for request in requests:
+        scheduler.add_request(request)
+    scheduler.step()
+    scheduler.close()
+    scheduler.close()
+    assert scheduler.is_done
+    assert all(r.status is RequestStatus.CANCELLED for r in requests)
+    assert not scheduler.cache.allocations
+    assert not scheduler._samplers
+    assert not scheduler._next_inputs
+    assert len(scheduler.finished) == 2
+
+
+def test_run_failure_cleans_other_pending_requests(monkeypatch):
+    scheduler = _make_scheduler()
+    requests = [Request(str(i), [1], 3) for i in range(3)]
+    for request in requests:
+        scheduler.add_request(request)
+    scheduler.step()
+    monkeypatch.setattr(scheduler.runner, "decode", lambda *args: (_ for _ in ()).throw(RuntimeError("decode")))
+    with pytest.raises(RuntimeError, match="decode"):
+        scheduler.run()
+    assert scheduler.is_done
+    assert not scheduler.cache.allocations
+    assert not scheduler._samplers
+    assert not scheduler._next_inputs
+    assert requests[0].status is RequestStatus.FAILED
+    assert all(r.status is RequestStatus.CANCELLED for r in requests[1:])
+
+
+def test_oversized_capacity_request_is_rejected():
+    scheduler = Scheduler(FakeRunner(capacity=1))
+    with pytest.raises(ValueError, match="capacity"):
+        scheduler.add_request(Request("too-large", [1, 2, 3], 4))
+    assert scheduler.is_done
+    assert not scheduler.cache.allocations
