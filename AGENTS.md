@@ -2,32 +2,45 @@
 
 ## Project Structure & Module Organization
 
-`src/llm/` contains the Python package. The primary focus is `inference/`: paged KV storage, block allocation, request scheduling, sampling, and model execution. `model/` provides the toy GPT testbed; `runtime/` contains CLI entry points. Configuration, tokenization, datasets, and checkpoint helpers sit at the package root.
+`src/llm/` is the shipped inference package (`llm`). Shared storage lives in
+`cache/`; `inference/` contains the Runner contract, request scheduling, and
+sampling. `models/qwen/` adapts Qwen forward and Transformers Cache;
+`runtime/generate.py` provides the real-model `llm-generate` CLI. Only inference
+configuration belongs in `src/llm/config.py` and root `configs/`.
 
-Keep tests in `tests/test_<module>.py`, configuration in `configs/base.yaml`, benchmark scripts in `benchmarks/`, and benchmark documentation in `.local/docs/benchmark.md`. Training text lives in `data/`; generated checkpoints belong in `outputs/`.
+`toy/` is a repository-only GPT model and training module, with its own config,
+checkpoint, dataset, runner, generator, and train/generate entry points. Its
+legacy character tokenizer lives in `toy/learning/char_tokenizer.py`. Model,
+training, and checkpoint tests live in `toy/tests/`; public cache, inference,
+and Qwen tests live in `tests/cache`, `tests/inference`, and `tests/models`.
+Root `examples/` is for Qwen; toy examples/tools/benchmarks live under `toy/`.
+Root `benchmarks/` keeps model-independent cache analysis and real-model checks.
+Do not create unused placeholder modules for future training or export work.
 
 ## Build, Test, and Development Commands
 
-Development runs inside the existing GPU container. On the host, use
-`./docker/dev.sh shell` or `./docker/dev.sh python -m pytest tests -q`.
-The common interpreter is `/opt/venv/bin/python`. Python 3.12 is selected by
-`.python-version`; package support remains Python 3.11+.
+Use the existing GPU container through `./docker/dev.sh`. Its interpreter is
+`/opt/venv/bin/python`; `.python-version` selects Python 3.12 for development
+while package support remains Python 3.11+.
 
-Inside the container:
-- `python -m pytest tests -q` runs production tests.
-- `python -m pytest tests/test_block_manager.py -v` runs allocator tests.
-- `llm-train --config configs/base.yaml` runs toy-model training.
-- `python benchmarks/kv_memory.py` and `python benchmarks/block_usage.py` run benchmarks.
+- `./docker/dev.sh python -m pytest tests toy/tests -q` runs all maintained tests.
+- `./docker/dev.sh python -m pytest tests/cache -q` runs shared cache tests.
+- `./docker/dev.sh python -m toy.train --config toy/configs/base.yaml` trains toy.
+- `./docker/dev.sh python -m toy.generate --ckpt outputs/ckpt.pt --prompt hello`
+  loads an existing character-model checkpoint.
+- `./docker/dev.sh llm-generate --config configs/qwen.yaml --prompt hello`
+  runs the real-model entry point using local mounted weights.
+- `./docker/dev.sh python benchmarks/kv_memory.py` runs memory arithmetic.
 
-docker/Dockerfile is the sole container installation recipe. It contains container
-version pins and reuses the CUDA PyTorch base. Do not run uv sync over the active
-container environment. pyproject.toml and uv.lock retain package/standalone
-workflow metadata. See README.md for image build and editor attach instructions.
-docker/dev.sh is a portable, versionable execution helper; it does not install
-dependencies or create containers.
-
-Container tooling lives in docker/, runnable demos in examples/, and dataset
-preparation in tools/. Keep these separate from benchmarks/.
+Run modules from the repository root. The installed wheel contains only `src/llm`;
+`toy` is intentionally available from the checkout, not the wheel.
+`docker/Dockerfile` is the sole container installation recipe and owns version
+pins. Reuse CUDA PyTorch; do not run `uv sync` over the active environment.
+`pyproject.toml` and `uv.lock` describe standalone package workflows.
+`docker/dev.sh` executes commands and can start the existing container; it does
+not install dependencies or create a replacement environment. Keep environment
+setup in `docker/`, never in benchmark scripts. Retain existing model mounts,
+data, training artifacts, and unrelated changes.
 
 ## Coding Style & Naming Conventions
 
@@ -43,7 +56,21 @@ Use short imperative subjects following history, such as `Add KV block allocator
 
 ## Architecture & Configuration
 
-Keep this a pure-PyTorch teaching implementation. Preserve dependency injection and separate block ownership (`BlockManager`) from tensor storage (`KVPool`). Keep generated checkpoints, logs, and local datasets out of commits; honor `.gitignore`.
+Keep this a PyTorch teaching implementation. Scheduler receives an injected
+Runner and controls request admission, cache allocation/growth/release, and
+sampling. Adapters parse model specifications and construct cache resources.
+BlockManager executes block ownership changes, KVPool stores tensors, and
+PagedKVCache maps logical positions and gathers standard KV pages. Shared cache
+code must not import scheduling, model adapters, or toy. Shared scheduling must
+not inspect model topology or KV tensor layouts. Qwen Cache adapts Transformers
+forward and never owns a second request lifecycle.
+
+Future MoE expert routing/execution belongs in the model layer. Standard-KV MoE
+may reuse existing cache resources; MLA and other special cache layouts require
+separate adapter/storage changes. Do not implement MoE operators, expert
+parallelism, a registry, or a large model factory ahead of an actual requirement.
+Paged storage plus gather is not a high-performance paged-attention kernel.
+Keep generated checkpoints, logs, and datasets out of commits; honor .gitignore.
 
 ## Lab Tutoring
 
@@ -51,4 +78,13 @@ Follow `.local/learning/README.md`. Explain in Chinese for a learner with basic 
 
 ## Local-only Materials
 
-The authoritative workspace is `/home/yzl/mini-vLLM` on the Linux server. Preserve server learner implementations; do not replace them with the Windows mirror. Learning code, its tests, and handouts live together in `.local/learning/labNN_topic/`; detailed project docs live in `.local/docs/`. These directories and root CLAUDE.md are ignored by Git. Root AGENTS.md is versionable under the current ignore rules. The public README contains only the project overview and runnable commands. Production modules must not import learning modules. Keep default pytest discovery restricted to `tests/`; run learning tests explicitly. See `.local/README.md` for the layout and migration details.
+The authoritative workspace is `/home/yzl/mini-vLLM` on the Linux server. Preserve
+server learner implementations; never replace them with the Windows mirror.
+Personal learning code/tests/handouts stay in `.local/learning/labNN_topic/`,
+and detailed project records in `.local/docs/`. These directories and root
+CLAUDE.md are ignored. Root AGENTS.md is versionable. README covers the project
+layout, runnable commands, inference boundaries, and future training/export plans.
+The shipped llm package must not import toy or personal lessons. Toy intentionally
+uses its preserved `toy.learning` character tokenizer. Restrict default pytest
+discovery to `tests/` and `toy/tests/`; run personal learning tests explicitly.
+See `.local/README.md` for the local-materials layout.
