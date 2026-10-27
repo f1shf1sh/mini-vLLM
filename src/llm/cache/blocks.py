@@ -105,7 +105,7 @@ class BlockManager:
             for _ in range(num_blocks):
                 table.append_block(self.allocator.allocate())
 
-        except Exception:
+        except BaseException:
             for block_id in table.physical_blocks:
                 self.allocator.free(block_id)
 

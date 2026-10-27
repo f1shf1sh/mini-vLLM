@@ -52,7 +52,8 @@ def test_refused_allocation_preserves_existing_request(free_blocks):
     assert manager.allocator.num_free == free_blocks + 1
 
 
-def test_mid_allocation_exception_rolls_back_only_new_blocks(monkeypatch):
+@pytest.mark.parametrize("failure_type", [RuntimeError, KeyboardInterrupt, SystemExit])
+def test_mid_allocation_exception_rolls_back_only_new_blocks(monkeypatch, failure_type):
     manager = BlockManager(BlockAllocator(4), block_size=4)
     manager.allocate_for_request("live", 4)
     before = snapshot(manager)
@@ -63,11 +64,11 @@ def test_mid_allocation_exception_rolls_back_only_new_blocks(monkeypatch):
         nonlocal calls
         calls += 1
         if calls == 2:
-            raise RuntimeError("injected allocation failure")
+            raise failure_type("injected allocation failure")
         return original_allocate()
 
     monkeypatch.setattr(manager.allocator, "allocate", fail_on_second_allocation)
-    with pytest.raises(RuntimeError, match="injected allocation failure"):
+    with pytest.raises(failure_type, match="injected allocation failure"):
         manager.allocate_for_request("new", 8)
 
     assert calls == 2

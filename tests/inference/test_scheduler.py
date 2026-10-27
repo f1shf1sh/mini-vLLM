@@ -389,3 +389,140 @@ def test_oversized_capacity_request_is_rejected():
         scheduler.add_request(Request("too-large", [1, 2, 3], 4))
     assert scheduler.is_done
     assert not scheduler.cache.allocations
+
+
+@pytest.mark.parametrize("max_new_tokens", [0, 3])
+def test_cancel_waiting_request_preserves_other_requests(max_new_tokens):
+    scheduler = _make_scheduler()
+    requests = [
+        Request("left", [1], 1),
+        Request("target", [2], max_new_tokens),
+        Request("right", [3], 1),
+    ]
+    for request in requests:
+        scheduler.add_request(request)
+    free_before = scheduler.cache.num_free
+
+    assert scheduler.cancel_request("target") is True
+
+    assert [r.request_id for r in scheduler.waiting] == ["left", "right"]
+    assert requests[1].status is RequestStatus.CANCELLED
+    assert requests[1].generated_ids == []
+    assert scheduler.cache.num_free == free_before
+    assert not scheduler.cache.allocations
+    assert "target" not in scheduler._samplers
+    assert "target" not in scheduler._next_inputs
+    assert not scheduler.runner.calls
+
+    scheduler.run()
+    assert requests[0].status is RequestStatus.FINISHED
+    assert requests[2].status is RequestStatus.FINISHED
+    assert all(request_id != "target" for _, request_id in scheduler.runner.calls)
+    assert scheduler.cache.num_free == free_before
+
+
+def test_cancel_running_request_releases_only_its_resources():
+    scheduler = _make_scheduler()
+    requests = [
+        Request(name, [1, 2], 3, SamplingParams(do_sample=False))
+        for name in ("left", "target", "right")
+    ]
+    for request in requests:
+        scheduler.add_request(request)
+    for _ in requests:
+        scheduler.step()
+    assert [r.request_id for r in scheduler.running] == ["left", "target", "right"]
+    other_allocations = {
+        name: length for name, length in scheduler.cache.allocations.items()
+        if name != "target"
+    }
+    generated_before = list(requests[1].generated_ids)
+    calls_before = len(scheduler.runner.calls)
+
+    assert scheduler.cancel_request("target") is True
+
+    assert [r.request_id for r in scheduler.running] == ["left", "right"]
+    assert scheduler.cache.allocations == other_allocations
+    assert requests[1].status is RequestStatus.CANCELLED
+    assert requests[1].generated_ids == generated_before
+    assert "target" not in scheduler._next_inputs
+    assert "target" not in scheduler._samplers
+    scheduler.run()
+    assert requests[0].status is RequestStatus.FINISHED
+    assert requests[2].status is RequestStatus.FINISHED
+    assert all(
+        request_id != "target"
+        for _, request_id in scheduler.runner.calls[calls_before:]
+    )
+    assert not scheduler.cache.allocations
+    assert not scheduler._next_inputs
+    assert not scheduler._samplers
+    assert scheduler.cache.num_free == scheduler.cache.capacity
+
+
+def test_cancel_twice_releases_and_records_request_only_once(monkeypatch):
+    scheduler = _make_scheduler()
+    request = Request("target", [1], 3)
+    scheduler.add_request(request)
+    scheduler.step()
+    releases = []
+    original_release = scheduler.cache.release
+
+    def record_release(request_id):
+        releases.append(request_id)
+        original_release(request_id)
+
+    monkeypatch.setattr(scheduler.cache, "release", record_release)
+    assert scheduler.cancel_request("target") is True
+    assert scheduler.cancel_request("target") is False
+    assert releases == ["target"]
+    assert scheduler.finished == [request]
+    assert request.status is RequestStatus.CANCELLED
+    assert scheduler.is_done
+    assert not scheduler.cache.allocations
+    scheduler.close()
+    assert releases == ["target"]
+    assert scheduler.finished == [request]
+
+
+def test_cancel_unknown_or_completed_request_changes_nothing(monkeypatch):
+    scheduler = _make_scheduler()
+    request = Request("live", [1], 1)
+    scheduler.add_request(request)
+    releases = []
+    original_release = scheduler.cache.release
+
+    def record_release(request_id):
+        releases.append(request_id)
+        original_release(request_id)
+
+    monkeypatch.setattr(scheduler.cache, "release", record_release)
+    assert scheduler.cancel_request("missing") is False
+    assert list(scheduler.waiting) == [request]
+    assert request.status is RequestStatus.WAITING
+    assert set(scheduler._samplers) == {"live"}
+    assert not scheduler.finished
+    assert not releases
+
+    scheduler.run()
+    assert scheduler.cancel_request("live") is False
+    assert releases == ["live"]
+    assert scheduler.finished == [request]
+    assert request.status is RequestStatus.FINISHED
+    assert scheduler.cache.num_free == scheduler.cache.capacity
+
+
+def test_cancel_uses_active_request_when_id_was_previously_completed():
+    scheduler = _make_scheduler()
+    previous = Request("reused", [1], 1)
+    scheduler.add_request(previous)
+    scheduler.run()
+
+    current = Request("reused", [2], 3)
+    scheduler.add_request(current)
+    assert scheduler.cancel_request("reused") is True
+    assert previous.status is RequestStatus.FINISHED
+    assert current.status is RequestStatus.CANCELLED
+    assert scheduler.finished == [previous, current]
+    assert scheduler.is_done
+    assert scheduler.cache.num_free == scheduler.cache.capacity
