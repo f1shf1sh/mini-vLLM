@@ -82,8 +82,11 @@ allocation, growth, and release operations without inspecting KV tensor layout.
 
 The final sampled token is returned without another forward, so maximum cached
 length is `prompt_length + max_new_tokens - 1`. Storage is released on completion,
-EOS, cancellation, or failure. `run()` cleans pending work on failure; callers
-stepping manually can call `close()` to cancel remaining work.
+EOS, cancellation, or failure. `cancel_request(request_id)` cancels one waiting
+or running request between steps and returns whether an active request was found.
+It preserves other requests and returns `False` for unknown or terminal IDs.
+`run()` cleans pending work on failure; callers stepping manually can call
+`close()` to cancel remaining work.
 
 For direct execution, `python -m toy.generate` calls GPTMini on the full prefix
 for each new token. It does not construct a Runner, Scheduler, or paged cache.

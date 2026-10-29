@@ -65,3 +65,36 @@ def test_qwen_scheduler_interleaves_gqa_requests_and_matches_greedy_reference():
     assert runner.model.config.num_attention_heads == 4
     assert runner.cache.block_manager.allocator.num_free == 12
     assert not runner.cache.block_manager.block_tables
+
+
+@torch.inference_mode()
+def test_qwen_cancellation_preserves_other_request_output_and_pages():
+    runner = tiny_runner()
+    survivor = Request("survivor", [1, 3, 5], 4, SamplingParams(do_sample=False))
+    cancelled = Request("cancelled", [2, 4], 5, SamplingParams(do_sample=False))
+    expected = torch.tensor([survivor.input_ids])
+    for _ in range(survivor.max_new_tokens):
+        logits = runner.model(expected, use_cache=False).logits
+        expected = torch.cat([expected, logits[:, -1].argmax(-1, keepdim=True)], dim=1)
+
+    scheduler = Scheduler(runner)
+    scheduler.add_request(survivor)
+    scheduler.add_request(cancelled)
+    scheduler.step()
+    scheduler.step()
+    table = runner.cache.block_manager.block_tables["survivor"]
+    blocks = list(table.physical_blocks)
+    pages = runner.cache.pool.pool[:, :, blocks].clone()
+    generated = list(cancelled.generated_ids)
+
+    assert scheduler.cancel_request("cancelled") is True
+    assert runner.cache.block_manager.block_tables["survivor"] is table
+    assert table.physical_blocks == blocks
+    torch.testing.assert_close(runner.cache.pool.pool[:, :, blocks], pages, rtol=0, atol=0)
+    scheduler.run()
+
+    assert survivor.output_ids == expected[0].tolist()
+    assert cancelled.status.name == "CANCELLED"
+    assert cancelled.generated_ids == generated
+    assert not runner.cache.block_manager.block_tables
+    assert runner.cache.block_manager.allocator.num_free == runner.cache.capacity

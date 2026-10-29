@@ -68,6 +68,20 @@ class Scheduler:
         )
         self.waiting.append(request)
 
+    def cancel_request(self, request_id: str) -> bool:
+        """Cancel one active request between steps, preserving other queue order.
+
+        Unknown or terminal IDs return False. A reused ID refers to its current
+        active request; cancellation does not interrupt an in-flight forward.
+        """
+        for queue in (self.waiting, self.running):
+            for index, request in enumerate(queue):
+                if request.request_id == request_id:
+                    del queue[index]
+                    self._finish_request(request, RequestStatus.CANCELLED)
+                    return True
+        return False
+
     def step(self) -> list[Request]:
         if self.waiting and self._can_admit(self.waiting[0]):
             request = self.waiting.popleft()
