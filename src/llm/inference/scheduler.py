@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
+from time import perf_counter_ns
 
 import torch
 
-from .request import Request, RequestStatus
+from .request import Request, RequestStatus, RequestTiming
 from .runner import Runner
 from .sampler import Sampler
 
@@ -16,7 +18,14 @@ class Scheduler:
     one request; this is not tensor-level continuous batching or paged attention.
     """
 
-    def __init__(self, runner: Runner, sampler: Sampler | None = None) -> None:
+    def __init__(
+        self,
+        runner: Runner,
+        sampler: Sampler | None = None,
+        *,
+        record_timing: bool = False,
+        clock: Callable[[], int] = perf_counter_ns,
+    ) -> None:
         self.waiting: deque[Request] = deque()
         self.running: deque[Request] = deque()
         self.finished: list[Request] = []
@@ -25,6 +34,8 @@ class Scheduler:
         self.runner = runner
         self.cache = runner.cache
         self.default_sampler = sampler or Sampler()
+        self.record_timing = record_timing
+        self._clock = clock
 
     def _required_capacity(self, request: Request) -> int:
         if request.max_new_tokens == 0:
@@ -43,6 +54,8 @@ class Scheduler:
         self._samplers.pop(request.request_id, None)
         request.status = status
         self.finished.append(request)
+        if request.timing is not None:
+            request.timing.finished_at_ns = self._clock()
 
     def add_request(self, request: Request) -> None:
         if request.request_id in self._samplers:
@@ -61,11 +74,14 @@ class Scheduler:
             )
         if self._required_capacity(request) > self.cache.capacity:
             raise ValueError("Request requires more cache capacity than is available.")
-        self._samplers[request.request_id] = (
+        sampler = (
             Sampler(request.sampling_params)
             if request.sampling_params is not None
             else self.default_sampler
         )
+        timing = RequestTiming(self._clock()) if self.record_timing else None
+        self._samplers[request.request_id] = sampler
+        request.timing = timing
         self.waiting.append(request)
 
     def cancel_request(self, request_id: str) -> bool:
@@ -97,6 +113,8 @@ class Scheduler:
                 self._finish_request(request, RequestStatus.FINISHED)
                 return [request]
             if prefill:
+                if request.timing is not None:
+                    request.timing.admitted_at_ns = self._clock()
                 request.mark_prefilling()
                 self.cache.allocate(request.request_id, request.prompt_length)
                 input_ids = torch.tensor(
@@ -111,6 +129,8 @@ class Scheduler:
                 )
             token = self._samplers[request.request_id].sample(output.logits)
             request.append_token(token.item())
+            if request.timing is not None:
+                request.timing.token_ready_at_ns.append(self._clock())
             if request.is_finished:
                 self._finish_request(request, RequestStatus.FINISHED)
                 return [request]

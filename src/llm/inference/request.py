@@ -14,6 +14,16 @@ class RequestStatus(Enum):
     CANCELLED = auto()
  
 @dataclass(slots=True)
+class RequestTiming:
+    """Monotonic host timestamps; token readiness follows the CPU token read."""
+
+    submitted_at_ns: int
+    admitted_at_ns: int | None = None
+    token_ready_at_ns: list[int] = field(default_factory=list)
+    finished_at_ns: int | None = None
+
+
+@dataclass(slots=True)
 class Request:
     request_id: str
     input_ids: list[int]
@@ -23,6 +33,7 @@ class Request:
     status: RequestStatus = RequestStatus.WAITING
     
     stop_token_ids: tuple[int, ...] = ()
+    timing: RequestTiming | None = field(default=None, init=False, repr=False)
 
     @property
     def prompt_length(self) -> int:

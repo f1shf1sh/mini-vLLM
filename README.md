@@ -88,6 +88,13 @@ It preserves other requests and returns `False` for unknown or terminal IDs.
 `run()` cleans pending work on failure; callers stepping manually can call
 `close()` to cancel remaining work.
 
+`Scheduler(runner, record_timing=True)` records optional per-request monotonic
+nanosecond timestamps in `request.timing`: submission, admission, each token's
+CPU readiness, and completion after cleanup. Timing is disabled by default.
+Zero-output requests have no admission/token timestamps, and cancelled or failed
+requests retain any timestamps already recorded. Statistics belong to the
+benchmark tooling, not the scheduler or cache.
+
 For direct execution, `python -m toy.generate` calls GPTMini on the full prefix
 for each new token. It does not construct a Runner, Scheduler, or paged cache.
 It only reuses the stateless public sampler. The direct path is for running and
