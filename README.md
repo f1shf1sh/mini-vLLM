@@ -32,7 +32,7 @@ toy/
 tests/                          cache/, inference/, models/
 configs/                        qwen.yaml
 examples/                       qwen_inference.py
-benchmarks/                     kv_memory.py (shared cache arithmetic)
+benchmarks/                     engine.py, metrics.py, kv_memory.py
 docker/                         Dockerfile, dev.sh
 ```
 
@@ -94,6 +94,12 @@ CPU readiness, and completion after cleanup. Timing is disabled by default.
 Zero-output requests have no admission/token timestamps, and cancelled or failed
 requests retain any timestamps already recorded. Statistics belong to the
 benchmark tooling, not the scheduler or cache.
+
+The [engine benchmark guide](benchmarks/README.md) describes reproducible
+in-process workloads, latency/throughput definitions, raw result files, and
+summary recalculation. Concurrency counts waiting plus running requests; each
+step still executes one request. Model loading, prompt encoding and warm-up are
+excluded from measurements. Results belong in ignored `outputs/benchmarks/`.
 
 For direct execution, `python -m toy.generate` calls GPTMini on the full prefix
 for each new token. It does not construct a Runner, Scheduler, or paged cache.
