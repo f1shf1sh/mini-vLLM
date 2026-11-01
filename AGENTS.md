@@ -83,12 +83,13 @@ Follow `.local/learning/README.md`. Explain in Chinese for a learner with basic 
 
 ## Local-only Materials
 
-The authoritative workspace is `/home/yzl/mini-vLLM` on the Linux server. Preserve
-server learner implementations; never replace them with the Windows mirror.
+Use the workspace selected for the current task as the authoritative checkout.
+Preserve existing learner implementations; never replace them with a mirror.
 Personal learning code/tests/handouts stay in `.local/learning/labNN_topic/`,
 and detailed project records in `.local/docs/`. These directories and root
-CLAUDE.md are ignored. Root AGENTS.md is versionable. README covers the project
-layout, runnable commands, inference boundaries, and future training/export plans.
+CLAUDE.md are ignored. Root AGENTS.md is versionable. README provides a short project overview and
+links to detailed documentation in `docs/`. Public documentation must use
+generic paths and must not include personal usernames or machine-specific locations.
 The shipped llm package must not import toy or personal lessons. GPTMiniRunner
 accepts an externally constructed model. Direct toy generation calls model
 forward without constructing Runner/Scheduler/cache resources. Toy uses its
