@@ -41,8 +41,9 @@ def test_qwen_paged_prefill_and_fragmented_decode_match_dense_logits(prompt_leng
     assert runner.cache.block_manager.allocator.num_free == runner.cache.capacity
 
 
+@pytest.mark.parametrize("max_batch_size", [1, 2, 4])
 @torch.inference_mode()
-def test_qwen_scheduler_interleaves_gqa_requests_and_matches_greedy_reference():
+def test_qwen_scheduler_interleaves_gqa_requests_and_matches_greedy_reference(max_batch_size):
     runner = tiny_runner()
     requests = [Request("short", [1, 3], 4, SamplingParams(do_sample=False)),
                 Request("long", [2, 4, 6, 8, 10], 4, SamplingParams(do_sample=False))]
@@ -53,7 +54,7 @@ def test_qwen_scheduler_interleaves_gqa_requests_and_matches_greedy_reference():
             token = runner.model(ids, use_cache=False).logits[:, -1].argmax(-1, keepdim=True)
             ids = torch.cat((ids, token), dim=1)
         references.append(ids[0].tolist())
-    scheduler = Scheduler(runner)
+    scheduler = Scheduler(runner, max_batch_size=max_batch_size)
     for request in requests:
         scheduler.add_request(request)
     scheduler.step()
@@ -67,8 +68,9 @@ def test_qwen_scheduler_interleaves_gqa_requests_and_matches_greedy_reference():
     assert not runner.cache.block_manager.block_tables
 
 
+@pytest.mark.parametrize("max_batch_size", [1, 2])
 @torch.inference_mode()
-def test_qwen_cancellation_preserves_other_request_output_and_pages():
+def test_qwen_cancellation_preserves_other_request_output_and_pages(max_batch_size):
     runner = tiny_runner()
     survivor = Request("survivor", [1, 3, 5], 4, SamplingParams(do_sample=False))
     cancelled = Request("cancelled", [2, 4], 5, SamplingParams(do_sample=False))
@@ -77,7 +79,7 @@ def test_qwen_cancellation_preserves_other_request_output_and_pages():
         logits = runner.model(expected, use_cache=False).logits
         expected = torch.cat([expected, logits[:, -1].argmax(-1, keepdim=True)], dim=1)
 
-    scheduler = Scheduler(runner)
+    scheduler = Scheduler(runner, max_batch_size=max_batch_size)
     scheduler.add_request(survivor)
     scheduler.add_request(cancelled)
     scheduler.step()

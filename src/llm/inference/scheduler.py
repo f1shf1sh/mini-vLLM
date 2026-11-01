@@ -3,19 +3,21 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 from time import perf_counter_ns
+from typing import cast
 
 import torch
 
 from .request import Request, RequestStatus, RequestTiming
-from .runner import Runner
+from .runner import BatchDecodeRunner, Runner
 from .sampler import Sampler
 
 
 class Scheduler:
     """FIFO admission and round-robin decode with injected model execution.
 
-    Reserve enough capacity for admitted requests to finish. Each step executes
-    one request; this is not tensor-level continuous batching or paged attention.
+    Reserve enough capacity for admitted requests to finish. Prefill executes
+    one request; decode can execute up to max_batch_size requests in one forward.
+    Scheduling and cancellation are synchronous, between steps.
     """
 
     def __init__(
@@ -23,9 +25,15 @@ class Scheduler:
         runner: Runner,
         sampler: Sampler | None = None,
         *,
+        max_batch_size: int = 1,
         record_timing: bool = False,
         clock: Callable[[], int] = perf_counter_ns,
     ) -> None:
+        if type(max_batch_size) is not int or max_batch_size < 1:
+            raise ValueError("max_batch_size must be a positive integer")
+        if max_batch_size > 1 and not callable(getattr(runner, "decode_batch", None)):
+            raise ValueError("max_batch_size > 1 requires a batch decode runner")
+        self.max_batch_size = max_batch_size
         self.waiting: deque[Request] = deque()
         self.running: deque[Request] = deque()
         self.finished: list[Request] = []
@@ -103,6 +111,8 @@ class Scheduler:
             request = self.waiting.popleft()
             prefill = True
         elif self.running:
+            if self.max_batch_size > 1:
+                return self._step_decode_batch()
             request = self.running.popleft()
             prefill = False
         else:
@@ -142,6 +152,60 @@ class Scheduler:
             self._finish_request(request, RequestStatus.FAILED)
             raise
         return []
+
+    def _step_decode_batch(self) -> list[Request]:
+        # Admission is already complete before dequeuing. No other request is
+        # admitted until this synchronous batch finishes, so reservations remain
+        # valid even while its members are temporarily outside self.running.
+        batch = [
+            self.running.popleft()
+            for _ in range(min(self.max_batch_size, len(self.running)))
+        ]
+        completed = []
+        completed_ids = set()
+        continuing = []
+        try:
+            request_ids = [request.request_id for request in batch]
+            input_ids = torch.cat([self._next_inputs[key] for key in request_ids], dim=0)
+            runner = cast(BatchDecodeRunner, self.runner)
+            output = runner.decode_batch(input_ids, request_ids)
+            if (output.logits.ndim != 3 or output.logits.shape[:2] != (len(batch), 1)
+                    or output.logits.shape[2] < 1):
+                raise ValueError("Batch decode logits must have shape [B, 1, vocabulary_size]")
+            # Keep each request's sampling policy while sharing the model forward.
+            # Sample every row before committing any result: a sampling failure
+            # invalidates the whole executing batch, whose KV may already change.
+            tokens = [
+                self._samplers[request.request_id].sample(output.logits[i:i + 1])
+                for i, request in enumerate(batch)
+            ]
+            token_ids = torch.cat(tokens, dim=0).flatten().cpu().tolist()
+            for request, token_id in zip(batch, token_ids):
+                request.append_token(token_id)
+            # All rows are observed ready after the same CPU transfer. Do not
+            # introduce artificial per-row latency by synchronizing each token.
+            if self.record_timing:
+                ready_at_ns = self._clock()
+                for request in batch:
+                    request.timing.token_ready_at_ns.append(ready_at_ns)
+            for request, token in zip(batch, tokens):
+                if request.is_finished:
+                    self._finish_request(request, RequestStatus.FINISHED)
+                    completed.append(request)
+                    completed_ids.add(request.request_id)
+                else:
+                    self.cache.append(request.request_id)
+                    self._next_inputs[request.request_id] = token
+                    continuing.append(request)
+            # Delay requeueing until all rows commit, so failures cannot leave a
+            # FAILED request in running or finish a previously completed row twice.
+            self.running.extend(continuing)
+        except BaseException:
+            for request in batch:
+                if request.request_id not in completed_ids:
+                    self._finish_request(request, RequestStatus.FAILED)
+            raise
+        return completed
 
     def run(self) -> list[Request]:
         """Drain submitted requests, releasing pending resources on failure."""
