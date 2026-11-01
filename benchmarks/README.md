@@ -4,8 +4,9 @@
 模型加载、tokenizer 编码、请求对象创建、预热、元数据哈希和结果写盘均在测量区间之外。
 没有 HTTP、网络传输或文本解码开销。
 
-当前 Scheduler 每次 `step()` 只执行一个请求。`concurrency` 是 **waiting + running**
-的上限，不是一次 GPU forward 的 batch size；提高并发可能增加排队时间，未必提高吞吐。
+Scheduler 的 prefill 每次执行一个请求，decode 可以把不同上下文长度的请求放入一次 forward。
+`concurrency` 是 **waiting + running** 的上限；`--max-batch-size` 是一次 decode
+的请求数上限（默认 1，保留原串行基线）。实际 batch 大小还受 running 请求数限制。
 可接纳的新请求优先 prefill，其余请求按轮转顺序 decode。
 
 ## 运行
@@ -37,6 +38,7 @@ python -m benchmarks.engine \
 | `--prompt-length` | `128` | 每个测量请求的精确输入 token 数 |
 | `--max-new-tokens` | `16` | 输出上限，允许为零 |
 | `--concurrency` | `1` | 同时未结束的请求数上限 |
+| `--max-batch-size` | `1` | 单次 decode forward 的请求数上限，prefill 仍逐请求 |
 | `--num-requests` | `12` | 每轮固定的请求总数 |
 | `--warmup` | `2` | **每轮**测量前的预热请求数，可为零 |
 | `--repeat` | `3` | 同配置重复测量轮数 |
@@ -74,7 +76,8 @@ python -m benchmarks.engine \
 
 CUDA 操作是异步的。脚本只在每轮开始计时前和结束计时前调用 CUDA synchronize，
 不为每个 forward 或每一层增加同步。逐 token 时间来自 Scheduler：
-在已有的 `token.item()` 等待 token 计算完成、并写入 `generated_ids` 后记录。
+单请求在已有的 `token.item()` 后记录；批量 decode 一次传回整批采样 token，
+写入各自 `generated_ids` 后给所有行记录同一就绪时刻。
 因此这些是 CPU 观察到 token 就绪的时间，不是纯 GPU kernel 耗时。
 
 所有事件使用 `time.perf_counter_ns()`；这是进程内单调时钟，数值不是 Unix 时间，
@@ -169,3 +172,17 @@ python -m pytest tests/inference/test_benchmark_metrics.py \
 测试覆盖数值口径、空/单 token、失败请求、分位数、损坏记录拒绝、并发上限、
 失败回收、EOS/固定输出、种子复现和小型本地 Qwen 的 CPU CLI 全流程。
 这些测试验证压测工具的正确性，不作为性能结果。
+
+
+批量 decode 示例（模型路径替换为本地目录）：
+
+```bash
+python -m benchmarks.engine --model /absolute/path/to/Qwen2.5-0.5B-Instruct \
+  --device cuda --dtype float32 --prompt-length 32 --max-new-tokens 8 \
+  --num-requests 8 --concurrency 4 --max-batch-size 4 --warmup 2 --repeat 3
+```
+
+当前使用 eager attention，分页 KV 在每层 gather 为右侧补零的矩形临时张量；
+mask 屏蔽补齐区域，RoPE 使用各请求真实位置。这是批量执行的正确性实现，
+临时 KV 搬运开销仍然存在。性能比较应保持 concurrency 和工作量一致，
+单独改变 max-batch-size；不能直接把提高 concurrency 的收益归因于批处理。

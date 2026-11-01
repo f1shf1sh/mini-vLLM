@@ -81,6 +81,7 @@ def run_closed_loop(
     requests: list[Request],
     concurrency: int,
     *,
+    max_batch_size: int = 1,
     clock=perf_counter_ns,
     synchronize=lambda: None,
 ) -> dict:
@@ -92,7 +93,7 @@ def run_closed_loop(
     """
     if concurrency < 1:
         raise ValueError("concurrency must be positive")
-    scheduler = Scheduler(runner, record_timing=True, clock=clock)
+    scheduler = Scheduler(runner, max_batch_size=max_batch_size, record_timing=True, clock=clock)
     before = cache_snapshot(runner)
     if not before["fully_released"]:
         raise ValueError("The runner has outstanding cache allocations before this run")
@@ -244,6 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-length", type=int, default=128)
     parser.add_argument("--max-new-tokens", type=int, default=16)
     parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--max-batch-size", type=int, default=1, help="Maximum requests per decode forward; prefill remains single-request.")
     parser.add_argument("--num-requests", type=int, default=12)
     parser.add_argument("--warmup", type=int, default=2, help="Number of warmup requests before EACH repeat; excluded from measurements.")
     parser.add_argument("--repeat", type=int, default=3)
@@ -256,7 +258,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    for name in ("num_blocks", "block_size", "prompt_length", "concurrency", "num_requests", "repeat"):
+    for name in ("num_blocks", "block_size", "prompt_length", "concurrency", "max_batch_size", "num_requests", "repeat"):
         if getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     for name in ("max_new_tokens", "warmup"):
@@ -329,10 +331,10 @@ def main(argv=None) -> int:
                 "max_admitted_by_cache": runner.cache.capacity // required_blocks if required_blocks else None,
             },
             "measurement_policy": {
-                "concurrency": "waiting + running; one request per Scheduler.step, no tensor batching",
+                "concurrency": "waiting + running; single-request prefill, decode up to max_batch_size per forward",
                 "interval": "after pre-run CUDA sync, before first submission, through drain/close/final CUDA sync",
                 "excluded": ["model loading", "tokenization", "input/Request construction", "warmup", "metadata hashing", "result file writes"],
-                "token_ready": "Scheduler timestamp after token.item() and append_token; no additional per-token synchronization",
+                "token_ready": "After CPU token read and append_token; batch rows share one readiness timestamp after the batch CPU transfer",
                 "warmup": "warmup requests before each repeat; RNG reseeded before measured requests",
             },
         }
@@ -345,7 +347,7 @@ def main(argv=None) -> int:
             if args.warmup:
                 torch.manual_seed(args.seed)
                 warmup_requests = make_requests(warmup_inputs, args.max_new_tokens, stop_ids, "warmup")
-                warmup = run_closed_loop(runner, warmup_requests, args.concurrency, synchronize=synchronize)
+                warmup = run_closed_loop(runner, warmup_requests, args.concurrency, max_batch_size=args.max_batch_size, synchronize=synchronize)
                 write_json(run_dir / "warmup.json", warmup)
                 write_records(run_dir / "warmup_requests.jsonl", warmup_requests)
                 if warmup["run_status"] != "success":
@@ -353,7 +355,7 @@ def main(argv=None) -> int:
                     return 1
             torch.manual_seed(args.seed)
             requests = make_requests(inputs, args.max_new_tokens, stop_ids, "request")
-            measurement = run_closed_loop(runner, requests, args.concurrency, synchronize=synchronize)
+            measurement = run_closed_loop(runner, requests, args.concurrency, max_batch_size=args.max_batch_size, synchronize=synchronize)
             write_records(run_dir / "requests.jsonl", requests)
             write_json(run_dir / "measurement.json", measurement)
             summary = summarize_run(run_dir)

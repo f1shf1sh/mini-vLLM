@@ -117,7 +117,8 @@ def test_resource_check_rejects_duplicate_free_ids_with_matching_count():
         run_closed_loop(runner, make_requests([[1]], 1, (), "r"), 1)
 
 
-def test_cpu_cli_runs_local_tiny_qwen_and_recomputes_each_repeat(tmp_path):
+@pytest.mark.parametrize("max_batch_size", [1, 2])
+def test_cpu_cli_runs_local_tiny_qwen_and_recomputes_each_repeat(tmp_path, max_batch_size):
     from tokenizers import Tokenizer, models, pre_tokenizers
     from transformers import PreTrainedTokenizerFast, Qwen2Config, Qwen2ForCausalLM
     from benchmarks.engine import main
@@ -144,6 +145,7 @@ def test_cpu_cli_runs_local_tiny_qwen_and_recomputes_each_repeat(tmp_path):
         "--num-blocks", "8", "--block-size", "2", "--prompt-length", "3",
         "--max-new-tokens", "2", "--num-requests", "3", "--concurrency", "2",
         "--warmup", "1", "--repeat", "2", "--output-dir", str(output),
+        "--max-batch-size", str(max_batch_size),
     ]) == 0
     experiments = list(output.iterdir())
     assert len(experiments) == 1
@@ -157,6 +159,7 @@ def test_cpu_cli_runs_local_tiny_qwen_and_recomputes_each_repeat(tmp_path):
         assert saved["cache_after"]["fully_released"]
         actual = json.loads((directory / "config.json").read_text())
         assert "benchmarks/engine.py" in actual["code"]["source_files_sha256"]
+        assert actual["arguments"]["max_batch_size"] == max_batch_size
         assert actual["workload"]["eos_policy"] == "fixed"
         assert len(actual["workload"]["input_ids"]) == 3
         assert "model.safetensors" in actual["model"]["files"]
