@@ -50,6 +50,73 @@ class QwenPagedCache(Cache):
         return self.paged_cache.gather(layer_idx, new_token_pos)
 
 
+
+class QwenBatchedDecodeCache(Cache):
+    """One-forward view over independent request pages, with right-padded KV.
+
+    Persistent pages contain only real tokens. Each layer writes one new token
+    at that row's logical position, then gathers [B, Hkv, Lmax, D] scratch KV.
+    Batch row order never changes block ownership.
+    """
+
+    def __init__(
+        self,
+        views: list[PagedKVCache],
+        num_layers: int,
+    ) -> None:
+        super().__init__()
+        if not views or any(view.num_tokens < 2 for view in views):
+            raise ValueError("Decode requires nonempty histories and a reserved new slot.")
+        self.views = tuple(views)
+        self.valid_lengths = tuple(view.num_tokens for view in views)
+        self.max_length = max(self.valid_lengths)
+        # A scheduler-reserved last slot has not been written yet.
+        self.lengths = [
+            [length - 1 for length in self.valid_lengths]
+            for _ in range(num_layers)
+        ]
+
+    def get_seq_length(self, layer_idx: int = 0) -> int:
+        # Transformers needs a scalar rectangular extent, not per-row positions.
+        return max(self.lengths[layer_idx])
+
+    def get_max_cache_shape(self):
+        return None
+
+    def update(
+        self,
+        key_states: torch.Tensor,
+        value_states: torch.Tensor,
+        layer_idx: int,
+        cache_kwargs=None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (key_states.ndim != 4 or key_states.shape[0] != len(self.views)
+                or key_states.shape[2] != 1):
+            raise ValueError("Batch decode KV must have shape [B, kv_heads, 1, head_dim].")
+        if value_states.shape != key_states.shape:
+            raise ValueError("Key and value shapes must match.")
+        positions = self.lengths[layer_idx]
+        if any(pos + 1 != length for pos, length in zip(positions, self.valid_lengths)):
+            raise ValueError("Each decode layer must write its reserved slot exactly once.")
+
+        batch, heads, _, dim = key_states.shape
+        # Zero padding also avoids uninitialized/NaN values entering QK or AV.
+        keys = key_states.new_zeros((batch, heads, self.max_length, dim))
+        values = value_states.new_zeros((batch, heads, self.max_length, dim))
+        for row, (view, position) in enumerate(zip(self.views, positions)):
+            # row:row+1 preserves the per-request [1, Hkv, 1, D] interface.
+            view.write_range(
+                layer_idx, key_states[row:row + 1], value_states[row:row + 1],
+                start_pos=position,
+            )
+            length = position + 1
+            k, v = view.gather(layer_idx, length)
+            keys[row:row + 1, :, :length, :] = k
+            values[row:row + 1, :, :length, :] = v
+            positions[row] = length
+        return keys, values
+
+
 def make_qwen_kv_pool(
     config,
     num_blocks: int,

@@ -60,3 +60,53 @@ def test_mounted_qwen_logits_greedy_scheduling_and_recovery():
     assert runner.cache.block_manager.allocator.num_free == runner.cache.capacity
     assert not runner.cache.block_manager.block_tables
     print(f"mounted Qwen: max_abs_logit_error={max(errors):.8f}; greedy requests=2; free_blocks={runner.cache.capacity}")
+
+
+@pytest.mark.skipif(not os.environ.get("QWEN_MODEL_PATH"), reason="QWEN_MODEL_PATH not provided; no weights are downloaded")
+@torch.inference_mode()
+def test_mounted_qwen_variable_batch_logits_and_kv_match_single():
+    from unittest.mock import patch
+
+    runner = QwenModelRunner.from_pretrained(
+        os.environ["QWEN_MODEL_PATH"], device=os.environ.get("QWEN_DEVICE", "cuda"),
+        num_blocks=64, block_size=4,
+    )
+    sequences = {
+        "short": [1, 3, 5],
+        "medium": [2, 4, 6, 8, 10, 12, 14],
+        "long": [11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31],
+    }
+    for name, ids in sequences.items():
+        for prefix in ("batch-", "single-"):
+            runner.cache.allocate(prefix + name, len(ids))
+            runner.prefill(torch.tensor([ids], device=runner.spec.device), prefix + name)
+    logit_error = 0.0
+    kv_error = 0.0
+    for step in range(3):
+        order = list(sequences)
+        if step % 2:
+            order.reverse()
+        tokens = torch.tensor([[41 + step + row] for row in range(3)], device=runner.spec.device)
+        for name in order:
+            runner.cache.append("batch-" + name)
+            runner.cache.append("single-" + name)
+        with patch.object(runner.model, "forward", wraps=runner.model.forward) as forward:
+            actual = runner.decode_batch(tokens, ["batch-" + name for name in order]).logits
+        assert forward.call_count == 1
+        for row, name in enumerate(order):
+            reference = runner.decode(tokens[row:row + 1], "single-" + name).logits
+            torch.testing.assert_close(actual[row:row + 1], reference, rtol=1e-4, atol=2e-4)
+            logit_error = max(logit_error, float((actual[row:row + 1] - reference).abs().max()))
+            sequences[name].append(int(tokens[row, 0]))
+            for layer in range(runner.model.config.num_hidden_layers):
+                batched_kv = runner.cache.view("batch-" + name).gather(layer, len(sequences[name]))
+                single_kv = runner.cache.view("single-" + name).gather(layer, len(sequences[name]))
+                for actual_kv, reference_kv in zip(batched_kv, single_kv):
+                    torch.testing.assert_close(actual_kv, reference_kv, rtol=1e-4, atol=2e-4)
+                    kv_error = max(kv_error, float((actual_kv - reference_kv).abs().max()))
+    for name in list(runner.cache.block_manager.block_tables):
+        runner.cache.release(name)
+    allocator = runner.cache.block_manager.allocator
+    assert not allocator.allocated
+    assert sorted(allocator.free_blocks) == list(range(runner.cache.capacity))
+    print(f"mounted batch Qwen: max_abs_logit_error={logit_error:.8g}; max_abs_kv_error={kv_error:.8g}")

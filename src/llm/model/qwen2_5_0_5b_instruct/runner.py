@@ -9,7 +9,7 @@ from llm.cache.paged import PagedCacheResources
 from llm.inference.runner import RunnerSpec
 from llm.inference.types import RunnerOutput
 
-from .cache import QwenPagedCache, make_qwen_kv_pool
+from .cache import QwenBatchedDecodeCache, QwenPagedCache, make_qwen_kv_pool
 
 
 class QwenModelRunner:
@@ -86,3 +86,60 @@ class QwenModelRunner:
 
     def decode(self, input_ids: torch.Tensor, request_id: str) -> RunnerOutput:
         return self._forward(input_ids, request_id, prefill=False)
+
+
+    @torch.inference_mode()
+    def decode_batch(
+        self,
+        input_ids: torch.Tensor,
+        request_ids: list[str],
+    ) -> RunnerOutput:
+        """Execute one real batched decode with row-local RoPE and KV ownership.
+
+        Scheduler reserves one unwritten slot per request before this call.
+        Input is [B, 1], output logits are [B, 1, V] in request_ids order.
+        """
+        batch_size = len(request_ids)
+        if (batch_size == 0 or input_ids.ndim != 2
+                or input_ids.shape != (batch_size, 1)):
+            raise ValueError("decode_batch expects nonempty input_ids of shape [B, 1].")
+        if any(not isinstance(key, str) for key in request_ids):
+            raise ValueError("request_ids must be strings.")
+        if len(set(request_ids)) != batch_size:
+            raise ValueError("Duplicate request IDs would alias KV writes.")
+        if input_ids.dtype != torch.long or input_ids.device != self.spec.device:
+            raise ValueError("input_ids must be torch.long on the runner device.")
+        if self.model.config._attn_implementation != "eager":
+            raise ValueError("Batched paged decode currently requires eager attention.")
+        if self.model.config.use_sliding_window:
+            raise ValueError("Batched paged decode currently requires full attention.")
+
+        # Resolve/validate every row before the first model layer can write KV.
+        views = [self.cache.view(key) for key in request_ids]
+        if any(view.num_tokens > self.spec.context_length for view in views):
+            raise ValueError("Request exceeds model context length.")
+        cache = QwenBatchedDecodeCache(views, self.model.config.num_hidden_layers)
+        lengths = torch.tensor(cache.valid_lengths, device=self.spec.device)
+        position_ids = (lengths - 1).unsqueeze(1)  # [B, 1], real RoPE positions
+        columns = torch.arange(cache.max_length, device=self.spec.device)
+        valid = columns.unsqueeze(0) < lengths.unsqueeze(1)  # [B, Lmax]
+        attention_mask = torch.zeros(
+            (batch_size, 1, 1, cache.max_length),
+            dtype=self.spec.dtype, device=self.spec.device,
+        )
+        attention_mask.masked_fill_(
+            ~valid[:, None, None, :], torch.finfo(self.spec.dtype).min,
+        )
+        # The explicit 4-D mask is already causal for one newest query per row.
+        # cache_position describes only the padded rectangular extent; RoPE and
+        # persistent writes use row-local positions above/in the cache adapter.
+        output = self.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            cache_position=columns[-1:],
+            past_key_values=cache,
+            use_cache=True,
+            return_dict=True,
+        )
+        return RunnerOutput(logits=output.logits)

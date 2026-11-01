@@ -45,3 +45,18 @@ class Runner(Protocol):
 
     def prefill(self, input_ids: torch.Tensor, request_id: str) -> RunnerOutput: ...
     def decode(self, input_ids: torch.Tensor, request_id: str) -> RunnerOutput: ...
+
+
+class BatchDecodeRunner(Runner, Protocol):
+    """Optional execution capability for one decode forward over several requests.
+
+    Input IDs are [B, 1] and output logits are [B, 1, vocabulary_size]. Row i
+    belongs to request_ids[i]. Each request has one reserved, unwritten KV slot;
+    adapters handle independent context lengths, masks, positions and KV layout.
+    """
+
+    def decode_batch(
+        self,
+        input_ids: torch.Tensor,
+        request_ids: list[str],
+    ) -> RunnerOutput: ...
