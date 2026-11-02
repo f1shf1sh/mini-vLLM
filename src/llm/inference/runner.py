@@ -47,6 +47,27 @@ class Runner(Protocol):
     def decode(self, input_ids: torch.Tensor, request_id: str) -> RunnerOutput: ...
 
 
+class BatchPrefillRunner(Runner, Protocol):
+    """Optional execution capability for one forward over variable-length prompts.
+
+    Input rows contain only real tokens: input_ids[i] belongs to request_ids[i].
+    IDs must be unique, prompts must be nonempty, and both lists have length B.
+    Before this call, Scheduler has reserved exactly each prompt's real length;
+    none of those prompt slots has been written yet.
+
+    Adapters own padding, positions, masks, and cache layout. Return logits with
+    shape [B, 1, vocabulary_size], selecting the last valid token of each row.
+    Scheduler owns allocation, sampling, growth, and release, including cleanup
+    after a forward that partially wrote KV. Do not mutate the input lists.
+    """
+
+    def prefill_batch(
+        self,
+        input_ids: list[list[int]],
+        request_ids: list[str],
+    ) -> RunnerOutput: ...
+
+
 class BatchDecodeRunner(Runner, Protocol):
     """Optional execution capability for one decode forward over several requests.
 

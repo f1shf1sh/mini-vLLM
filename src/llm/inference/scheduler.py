@@ -8,16 +8,18 @@ from typing import cast
 import torch
 
 from .request import Request, RequestStatus, RequestTiming
-from .runner import BatchDecodeRunner, Runner
+from .runner import BatchDecodeRunner, BatchPrefillRunner, Runner
 from .sampler import Sampler
 
 
 class Scheduler:
     """FIFO admission and round-robin decode with injected model execution.
 
-    Reserve enough capacity for admitted requests to finish. Prefill executes
-    one request; decode can execute up to max_batch_size requests in one forward.
-    Scheduling and cancellation are synchronous, between steps.
+    Reserve enough capacity for admitted requests to finish. Prefill batches
+    obey max_prefill_batch_size and the padded-token budget max_prefill_tokens.
+    max_batch_size continues to control decode only; defaults use single-request
+    runner methods. Scheduling and cancellation are synchronous, between steps.
+    Admissible waiting requests still take priority over decode.
     """
 
     def __init__(
@@ -26,6 +28,8 @@ class Scheduler:
         sampler: Sampler | None = None,
         *,
         max_batch_size: int = 1,
+        max_prefill_batch_size: int = 1,
+        max_prefill_tokens: int | None = None,
         record_timing: bool = False,
         clock: Callable[[], int] = perf_counter_ns,
     ) -> None:
@@ -33,7 +37,21 @@ class Scheduler:
             raise ValueError("max_batch_size must be a positive integer")
         if max_batch_size > 1 and not callable(getattr(runner, "decode_batch", None)):
             raise ValueError("max_batch_size > 1 requires a batch decode runner")
+        if type(max_prefill_batch_size) is not int or max_prefill_batch_size < 1:
+            raise ValueError("max_prefill_batch_size must be a positive integer")
+        if max_prefill_tokens is not None:
+            if type(max_prefill_tokens) is not int or max_prefill_tokens < 1:
+                raise ValueError("max_prefill_tokens must be a positive integer")
+        if max_prefill_batch_size > 1 and not callable(getattr(runner, "prefill_batch", None)):
+            raise ValueError("max_prefill_batch_size > 1 requires a batch prefill runner")
+
         self.max_batch_size = max_batch_size
+        self.max_prefill_batch_size = max_prefill_batch_size
+        # This counts padded input tokens (B * T), not persistent KV slots.
+        if max_prefill_tokens is None:
+            self.max_prefill_tokens = runner.spec.context_length
+        else:
+            self.max_prefill_tokens = max_prefill_tokens
         self.waiting: deque[Request] = deque()
         self.running: deque[Request] = deque()
         self.finished: list[Request] = []
@@ -82,6 +100,10 @@ class Scheduler:
             )
         if self._required_capacity(request) > self.cache.capacity:
             raise ValueError("Request requires more cache capacity than is available.")
+        # Reject before registering state so an oversized FIFO head cannot
+        # wait forever. Zero-output requests never perform prefill.
+        if request.max_new_tokens > 0 and request.prompt_length > self.max_prefill_tokens:
+            raise ValueError("Request prompt exceeds the prefill token budget.")
         sampler = (
             Sampler(request.sampling_params)
             if request.sampling_params is not None
@@ -108,6 +130,9 @@ class Scheduler:
 
     def step(self) -> list[Request]:
         if self.waiting and self._can_admit(self.waiting[0]):
+            if self.max_prefill_batch_size > 1:
+                # The batch method owns selection and dequeueing, not this hook.
+                return self._step_prefill_batch()
             request = self.waiting.popleft()
             prefill = True
         elif self.running:
@@ -152,6 +177,108 @@ class Scheduler:
             self._finish_request(request, RequestStatus.FAILED)
             raise
         return []
+
+    def _step_prefill_batch(self) -> list[Request]:
+        """Admit a FIFO prefill batch and return requests finished by this step.
+
+        Scheduler owns selection, reservation, sampling, and cleanup. The runner
+        receives unpadded token lists and returns next-token logits [B, 1, V].
+        Requests removed from waiting remain owned by this method until they
+        finish or enter running; a failed forward's KV must not be reused.
+        """
+        batch: list[Request] = []
+        completed: list[Request] = []
+        completed_ids: set[str] = set()
+        continuing: list[Request] = []
+
+        # These are completion-capacity commitments, not currently allocated
+        # blocks. Selected requests must count even before they enter running.
+        reserved_capacity = sum(self._required_capacity(request) for request in self.running)
+        max_prompt_length = 0
+        try:
+            while self.waiting and len(batch) < self.max_prefill_batch_size:
+                request = self.waiting[0]
+                if request.max_new_tokens == 0:
+                    # No forward, allocation, admission time, or output token.
+                    self.waiting.popleft()
+                    self._finish_request(request, RequestStatus.FINISHED)
+                    completed.append(request)
+                    completed_ids.add(request.request_id)
+                    continue
+
+                candidate_batch_size = len(batch) + 1
+                candidate_max_length = max(max_prompt_length, request.prompt_length)
+                padded_token_count = candidate_batch_size * candidate_max_length
+                if padded_token_count > self.max_prefill_tokens:
+                    break
+
+                request_capacity = self._required_capacity(request)
+                if reserved_capacity + request_capacity > self.cache.capacity:
+                    break
+
+                # Preserve FIFO: a request that does not fit stays at the head.
+                batch.append(self.waiting.popleft())
+                reserved_capacity += request_capacity
+                max_prompt_length = candidate_max_length
+
+            if not batch:
+                return completed
+
+            for request in batch:
+                if request.timing is not None:
+                    request.timing.admitted_at_ns = self._clock()
+                request.mark_prefilling()
+                # Reserve only real prompt slots. None has been written yet;
+                # rectangular padding belongs exclusively to the runner.
+                self.cache.allocate(request.request_id, request.prompt_length)
+
+            request_ids = [request.request_id for request in batch]
+            input_ids = [request.input_ids for request in batch]
+            runner = cast(BatchPrefillRunner, self.runner)
+            output = runner.prefill_batch(input_ids, request_ids)
+            logits = output.logits
+            if logits.ndim != 3 or logits.shape[:2] != (len(batch), 1) or logits.shape[2] < 1:
+                raise ValueError("Batch prefill logits must have shape [B, 1, vocabulary_size]")
+
+            tokens = []
+            for row, request in enumerate(batch):
+                request.mark_decoding()
+                # Keep [1, 1, V] for the existing per-request sampler.
+                token = self._samplers[request.request_id].sample(logits[row:row + 1])
+                tokens.append(token)
+
+            # Sample every row before committing any output. A sampling failure
+            # invalidates the executing batch because forward may have written KV.
+            token_ids = torch.cat(tokens, dim=0).flatten().cpu().tolist()
+            for request, token_id in zip(batch, token_ids):
+                request.append_token(token_id)
+
+            if self.record_timing:
+                ready_at_ns = self._clock()
+                for request in batch:
+                    request.timing.token_ready_at_ns.append(ready_at_ns)
+
+            for request, token in zip(batch, tokens):
+                if request.is_finished:
+                    self._finish_request(request, RequestStatus.FINISHED)
+                    completed.append(request)
+                    completed_ids.add(request.request_id)
+                else:
+                    # The sampled token is next round's input. Reserve its slot
+                    # only if another forward is needed for this request.
+                    self.cache.append(request.request_id)
+                    self._next_inputs[request.request_id] = token
+                    continuing.append(request)
+
+            # Do not leave partially committed rows in running if a later row's
+            # growth fails. Already finished rows must never finish twice.
+            self.running.extend(continuing)
+        except BaseException:
+            for request in batch:
+                if request.request_id not in completed_ids:
+                    self._finish_request(request, RequestStatus.FAILED)
+            raise
+        return completed
 
     def _step_decode_batch(self) -> list[Request]:
         # Admission is already complete before dequeuing. No other request is

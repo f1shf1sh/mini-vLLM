@@ -14,8 +14,10 @@ class PagedKVCache:
     block internals.
 
     ``num_tokens`` is the total token count tracked by the BlockTable
-    — this number may include one unwritten slot during decode (after
-    ``BlockManager.append_token`` has incremented it).
+    and describes reserved logical slots, not per-layer write progress.
+    Before prefill, the entire reserved prompt range is unwritten. During decode,
+    it may include one unwritten slot after BlockManager.append_token increments
+    it. Model cache adapters track how much of each layer has actually been written.
     """
 
     def __init__(
