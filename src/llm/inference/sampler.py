@@ -24,11 +24,24 @@ class SamplingParams:
 
 
 class Sampler:
-    def __init__(self, params: SamplingParams | None = None) -> None:
+    def __init__(
+        self,
+        params: SamplingParams | None = None,
+        *,
+        device: str | torch.device = "cpu",
+    ) -> None:
         self.params = params or SamplingParams()
+        self.device = torch.device(device)
+        if self.device.type == "cuda" and self.device.index is None:
+            self.device = torch.device("cuda", torch.cuda.current_device())
+
+    def synchronize(self) -> None:
+        """Wait for sampling work on the fixed device."""
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
 
     def sample(self, logits: torch.Tensor) -> torch.Tensor:
-        logits = logits[:, -1, :]
+        """Convert full-vocabulary logits [R, V] into token IDs [R, 1]."""
         if not self.params.do_sample:
             return logits.argmax(dim=-1, keepdim=True)
         logits = logits / self.params.temperature

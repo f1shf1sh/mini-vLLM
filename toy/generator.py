@@ -7,7 +7,7 @@ from llm.inference.sampler import Sampler, SamplingParams
 
 
 class Generator:
-    """Run full-prefix model forward and reuse the shared stateless sampler."""
+    """Run full-prefix model forward and reuse the shared sampler."""
 
     def __init__(
         self,
@@ -15,7 +15,10 @@ class Generator:
         sampler: Sampler | None = None,
     ) -> None:
         self.model = model.eval()
-        self.sampler = sampler or Sampler()
+        if sampler is None:
+            model_device = next(self.model.parameters()).device
+            sampler = Sampler(device=model_device)
+        self.sampler = sampler
 
     @torch.no_grad()
     def generate(
@@ -40,7 +43,9 @@ class Generator:
         output_ids = input_ids
         for _ in range(max_new_tokens):
             logits, _ = self.model(output_ids)
-            output_ids = torch.cat((output_ids, self.sampler.sample(logits)), dim=1)
+            next_token_logits = logits[:, -1, :]
+            next_token = self.sampler.sample(next_token_logits)
+            output_ids = torch.cat((output_ids, next_token), dim=1)
         return output_ids
 
 
@@ -50,4 +55,5 @@ def generate_tokens(
     max_new_tokens: int,
     sampling_params: SamplingParams | None = None,
 ) -> torch.Tensor:
-    return Generator(model, Sampler(sampling_params)).generate(input_ids, max_new_tokens)
+    sampler = Sampler(sampling_params, device=input_ids.device)
+    return Generator(model, sampler).generate(input_ids, max_new_tokens)

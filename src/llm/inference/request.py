@@ -34,8 +34,7 @@ class Request:
     
     stop_token_ids: tuple[int, ...] = ()
     timing: RequestTiming | None = field(default=None, init=False, repr=False)
-    # TODO(module 7): commit after validated execution; reset after KV release.
-    # The legacy runner path does not maintain this progress field.
+    # Scheduler commits this after execution and clears it after KV release.
     num_computed_tokens: int = 0
 
     @property
