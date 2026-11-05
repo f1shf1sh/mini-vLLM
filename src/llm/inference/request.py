@@ -34,6 +34,9 @@ class Request:
     
     stop_token_ids: tuple[int, ...] = ()
     timing: RequestTiming | None = field(default=None, init=False, repr=False)
+    # TODO(module 7): commit after validated execution; reset after KV release.
+    # The legacy runner path does not maintain this progress field.
+    num_computed_tokens: int = 0
 
     @property
     def prompt_length(self) -> int:
@@ -48,11 +51,18 @@ class Request:
         return self.input_ids + self.generated_ids
     
     @property
-    def is_finished(self) -> bool:
+    def should_stop(self) -> bool:
+        """Whether output reached its limit or an EOS token."""
         return (
-            self.status in (RequestStatus.FINISHED, RequestStatus.FAILED, RequestStatus.CANCELLED)
-            or self.num_generated_tokens >= self.max_new_tokens
+            self.num_generated_tokens >= self.max_new_tokens
             or bool(self.generated_ids and self.generated_ids[-1] in self.stop_token_ids)
+        )
+
+    @property
+    def is_finished(self) -> bool:
+        """Whether Scheduler has assigned a terminal state."""
+        return self.status in (
+            RequestStatus.FINISHED, RequestStatus.FAILED, RequestStatus.CANCELLED,
         )
     
     def mark_prefilling(self) -> None:
@@ -62,7 +72,5 @@ class Request:
         self.status = RequestStatus.DECODING
 
     def append_token(self, token_id: int) -> None:
+        """Append output without committing KV progress or a terminal state."""
         self.generated_ids.append(token_id)
-        
-        if self.is_finished:
-            self.status = RequestStatus.FINISHED

@@ -144,7 +144,7 @@ class Scheduler:
             return []
 
         try:
-            if request.is_finished:
+            if request.should_stop:
                 self._finish_request(request, RequestStatus.FINISHED)
                 return [request]
             if prefill:
@@ -166,7 +166,7 @@ class Scheduler:
             request.append_token(token.item())
             if request.timing is not None:
                 request.timing.token_ready_at_ns.append(self._clock())
-            if request.is_finished:
+            if request.should_stop:
                 self._finish_request(request, RequestStatus.FINISHED)
                 return [request]
             # The last sampled token is returned without another forward pass.
@@ -259,7 +259,7 @@ class Scheduler:
                     request.timing.token_ready_at_ns.append(ready_at_ns)
 
             for request, token in zip(batch, tokens):
-                if request.is_finished:
+                if request.should_stop:
                     self._finish_request(request, RequestStatus.FINISHED)
                     completed.append(request)
                     completed_ids.add(request.request_id)
@@ -316,7 +316,7 @@ class Scheduler:
                 for request in batch:
                     request.timing.token_ready_at_ns.append(ready_at_ns)
             for request, token in zip(batch, tokens):
-                if request.is_finished:
+                if request.should_stop:
                     self._finish_request(request, RequestStatus.FINISHED)
                     completed.append(request)
                     completed_ids.add(request.request_id)

@@ -1,8 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import IntEnum
 
 import torch
+
+
+@dataclass(frozen=True, slots=True)
+class KVSpec:
+    """Rank-local KV dimensions and serializable device/dtype names."""
+
+    num_layers: int
+    num_kv_heads: int
+    head_dim: int
+    device: str
+    dtype: str
 
 
 class PoolDim(IntEnum):

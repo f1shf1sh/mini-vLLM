@@ -45,6 +45,7 @@ class TinyRunner:
         )
         assert request.status is expected_status
         assert not request.is_finished
+        assert not request.should_stop
         expected_input = (
             request.input_ids if stage == "prefill" else request.generated_ids[-1:]
         )
@@ -120,6 +121,7 @@ def assert_invariants(scheduler, accepted, terminal_snapshots=None):
     for request in running:
         assert request.status is RequestStatus.DECODING
         assert not request.is_finished
+        assert not request.should_stop
         assert request.generated_ids
         table = manager.block_tables[request.request_id]
         assert table.num_tokens == request.prompt_length + len(request.generated_ids)

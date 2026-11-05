@@ -1,12 +1,39 @@
-"""Configuration for real-model inference only."""
+"""Inference settings; new data configs are checked at their startup boundaries."""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
 from .inference.sampler import SamplingParams
+
+
+@dataclass(frozen=True, slots=True)
+class ModelConfig:
+    """Serializable model source; loading belongs to Worker/Loader."""
+
+    model: str
+    dtype: str = "float32"
+
+
+@dataclass(frozen=True, slots=True)
+class CacheConfig:
+    """Common capacity confirmed by Executor, not a per-worker budget."""
+
+    block_size: int
+    num_blocks: int
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutorConfig:
+    """Execution settings only; declaring a backend does not implement it."""
+
+    backend: Literal["local", "multiprocess"] = "local"
+    result_transport: Literal["local_device", "cpu"] = "local_device"
+    init_method: str | None = None
+    timeout_seconds: float = 30.0
 
 
 @dataclass(slots=True)

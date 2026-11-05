@@ -1,6 +1,20 @@
 from __future__ import annotations
 
 from collections import deque
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True, slots=True)
+class BlockTableSnapshot:
+    """Immutable mapping data; page validity is checked at cache boundaries."""
+
+    block_ids: tuple[int, ...]
+    reserved_tokens: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.block_ids, tuple):
+            raise TypeError("block_ids must be a tuple")
+
 
 class BlockTable:
     '''
